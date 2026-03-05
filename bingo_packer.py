@@ -32,6 +32,7 @@ class BingoPacker(QMainWindow):
     def __init__(self):
         super().__init__()
         self.selected_folders = []
+        self.asset_files = []
         # 动画播放相关
         self.preview_images = []
         self.current_frame = 0
@@ -44,7 +45,7 @@ class BingoPacker(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
-        # --- 2. 窗口初始化与 QSS 样式 (完整保留) ---
+        # --- 窗口初始化 ---
         self.setWindowTitle("Bingo Sprite Packer")
         self.setFixedWidth(760)
         self.setFixedHeight(620)
@@ -53,24 +54,14 @@ class BingoPacker(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+        # --- 恢复你最开始的全局 QSS 样式 (确保不破坏左侧) ---
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
-            QSizeGrip { width: 0; height: 0; image: none; }
-            QFileDialog QAbstractItemView {
-                background-color: #181825; color: #cdd6f4;
-                border: 1px solid #313244; border-radius: 8px;
-            }
-            QFileDialog QPushButton {
-                background-color: #313244; color: white;
-                border-radius: 6px; padding: 5px 12px; min-width: 60px;
-            }
-            QFileDialog QPushButton:hover { background-color: #45475a; }
-            QFileDialog QHeaderView::section { background-color: #313244; color: #cdd6f4; padding: 4px; border: none; }
-            QFileDialog QLineEdit {
-                background-color: #11111b; color: #cdd6f4;
-                border: 1px solid #313244; border-radius: 4px; padding: 2px;
-            }
-            QFileDialog QLabel { color: #cdd6f4; }
+            QTextEdit { background-color: #181825; border: 1px solid #313244; border-radius: 10px; color: #cdd6f4; }
+            QPushButton { border-radius: 6px; color: white; font-weight: bold; background-color: #313244; }
+            QPushButton:hover { background-color: #45475a; }
+            QScrollBar:vertical, QScrollBar:horizontal {width: 0px;height: 0px;background: transparent;}
+            QMainWindow, QWidget#MainContainer, QFrame {border: none;outline: none;}
         """)
 
         self.central_widget = QWidget()
@@ -79,7 +70,7 @@ class BingoPacker(QMainWindow):
         self.global_layout.setContentsMargins(0, 0, 0, 0)
         self.global_layout.setSpacing(0)
 
-        # --- 3. 左侧主功能区 (保持原有 760 布局) ---
+        # --- 左侧主功能区 (保持 760 宽度和原始样式) ---
         self.main_container = QWidget()
         self.main_container.setFixedWidth(760)
         main_layout = QVBoxLayout(self.main_container)
@@ -93,20 +84,17 @@ class BingoPacker(QMainWindow):
 
         self.console = QTextEdit()
         self.console.setReadOnly(True)
+        # 针对左侧控制台
+        self.console.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        
         self.console.setPlaceholderText("可直接将文件夹拖拽至此处导入...")
-        self.console.setStyleSheet("""
-            QTextEdit {
-                background-color: #181825; border: 1px solid #313244; border-radius: 12px;
-                padding: 10px; color: #cdd6f4; font-family: 'Consolas', 'Menlo', 'monospace'; font-size: 16px;
-            }
-        """)
+        # 针对左侧控制台的特定样式
+        self.console.setStyleSheet("border: 1px solid #313244; border-radius: 12px; padding: 10px; font-size: 16px;")
         main_layout.addWidget(self.console)
 
-        # 底部动作条 (带色彩逻辑的按钮)
         button_layout = QHBoxLayout()
-        btn_base_style = "QPushButton { border-radius: 8px; padding: 8px 12px; color: white; font-weight: bold; font-family: 'Microsoft YaHei', 'PingFang SC'; }"
-        
-        # 按钮定义配置 (合并了旧逻辑与新 UI)
         btns_config = [
             (" 导入", self.pick_folders, "#313244", "#45475a"),
             (" 清空", self.clear_all, "#313244", "#f38ba8"),
@@ -122,50 +110,103 @@ class BingoPacker(QMainWindow):
                 button_layout.addStretch()
                 continue
             btn = QPushButton(text)
-            btn.setStyleSheet(f"{btn_base_style} QPushButton {{ background-color: {bg}; }} QPushButton:hover {{ background-color: {hover}; }}")
+            # 锁定导出按钮和普通按钮的原始色彩逻辑
+            btn.setStyleSheet(f"QPushButton {{ background-color: {bg}; padding: 8px 12px; }} QPushButton:hover {{ background-color: {hover}; }}")
             btn.clicked.connect(func)
             button_layout.addWidget(btn)
 
         main_layout.addLayout(button_layout)
         self.global_layout.addWidget(self.main_container)
 
-        # --- 4. 右侧预览管理面板 (完整新 UI 设计) ---
+        # --- 右侧预览管理面板 (独立局部样式) ---
         self.preview_drawer = QFrame()
         self.preview_drawer.setFixedWidth(0)
-        self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 1px solid #313244;")
+        self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 2px solid #313244;")
         drawer_layout = QVBoxLayout(self.preview_drawer)
         drawer_layout.setContentsMargins(12, 15, 12, 15)
-        drawer_layout.setSpacing(8)
+        drawer_layout.setSpacing(10)
 
+        # 1. 标题 (去边框)
         title = QLabel("动画预览")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #89b4fa; font-weight: bold; border: none; font-size: 14px; margin-bottom: 2px;")
+        title.setStyleSheet("color: #89b4fa; font-weight: bold; border: none; font-size: 14px;")
         drawer_layout.addWidget(title)
 
+        # 2. 预览显示窗 (去边框)
         self.preview_screen = QLabel("🎬")
         self.preview_screen.setFixedSize(256, 256)
         self.preview_screen.setAlignment(Qt.AlignCenter)
-        self.preview_screen.setStyleSheet("background-color: #000000; border-radius: 6px; border: 1px solid #313244; color: #45475a;")
+        self.preview_screen.setStyleSheet("background-color: #000000; border-radius: 12px; border: none;")
         drawer_layout.addWidget(self.preview_screen, 0, Qt.AlignCenter)
 
+        # 3. 播放控制条 (使用 create_mini_btn)
         playback_layout = QHBoxLayout()
         playback_layout.setSpacing(4)
-        self.btn_first = self.create_mini_btn("⏮", self.first_frame)
-        self.btn_prev = self.create_mini_btn("◀", self.prev_frame)
-        self.btn_play = self.create_mini_btn("▶", self.toggle_playback)
-        self.btn_next = self.create_mini_btn("▶️", self.next_frame)
-        self.btn_last = self.create_mini_btn("⏭", self.last_frame)
-        for b in [self.btn_first, self.btn_prev, self.btn_play, self.btn_next, self.btn_last]:
-            playback_layout.addWidget(b)
+        for icon, func in [("⏮", self.first_frame), ("◀", self.prev_frame), 
+                           ("▶", self.toggle_playback), ("▶️", self.next_frame), ("⏭", self.last_frame)]:
+            btn = self.create_mini_btn(icon, func)
+            if icon == "▶":
+                self.btn_play =btn
+            playback_layout.addWidget(btn)
         drawer_layout.addLayout(playback_layout)
 
+        # 4 & 5. 资源列表区域 (按照你的要求：亮色底、无 border、圆角)
+        self.res_container = QWidget()
+        # 容器设置为亮一点的底色 #181825，无边框
+        self.res_container.setStyleSheet("background-color: #181825; border-radius: 12px; border: none;")
+        res_container_layout = QVBoxLayout(self.res_container)
+        res_container_layout.setContentsMargins(0, 0, 0, 0)
+
         self.res_list_display = QTextEdit()
+        # 内部 List 完全透明无边框
+        self.res_list_display.setStyleSheet("background-color: transparent; border: none; padding: 5px;")
         self.res_list_display.setReadOnly(True)
-        self.res_list_display.setPlaceholderText("待加载资源序列...")
-        self.res_list_display.setStyleSheet("background-color: #181825; border: 1px solid #313244; font-size: 12px; color: #a6adc8;")
-        drawer_layout.addWidget(self.res_list_display)
+        self.res_list_display.setPlaceholderText("导入资源以预览...")
+        # 针对右侧资源列表
+        self.res_list_display.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.res_list_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.res_list_display.setTextInteractionFlags(Qt.NoTextInteraction) # 禁止文本选择
+        self.res_list_display.viewport().setCursor(Qt.ArrowCursor)       # 强制显示标准箭头光标
+
+
+        res_container_layout.addWidget(self.res_list_display)
+
+        # 6. 右下角悬浮按钮 (修复 + 号显示不全和样式)
+        self.btn_upload = QPushButton("+", self.res_container)
+        # 样式维持现状颜色 #313244，去掉 border，修复居中
+        self.btn_upload.setFixedSize(32, 32)
+        self.btn_upload.setCursor(Qt.PointingHandCursor)
+        self.btn_upload.setStyleSheet("""
+            QPushButton { 
+                background-color: #313244; 
+                border: none; 
+                border-radius: 8px; 
+                font-size: 20px; 
+                padding-bottom: 2px; /* 视觉微调让+号垂直居中 */
+            } 
+            QPushButton:hover { background-color: #45475a; }
+        """)
+
         
+        # 确保只连接一次
+        self.btn_upload.clicked.connect(self.import_preview_assets)
+        self.res_list_display.mousePressEvent = self.on_res_list_click
+
+
+        
+        drawer_layout.addWidget(self.res_container)
         self.global_layout.addWidget(self.preview_drawer)
+
+    def resizeEvent(self, event):
+        """ 确保上传按钮始终在资源列表的右下角 """
+        super().resizeEvent(event)
+        if hasattr(self, 'btn_upload') and hasattr(self, 'res_container'):
+            margin = 10
+            self.btn_upload.move(
+                self.res_container.width() - self.btn_upload.width() - margin,
+                self.res_container.height() - self.btn_upload.height() - margin
+            )
 
     def create_mini_btn(self, text, func):
         btn = QPushButton(text)
@@ -173,6 +214,9 @@ class BingoPacker(QMainWindow):
         btn.setStyleSheet("font-size: 12px; background-color: #1e1e2e; border: 1px solid #313244; padding: 0px;")
         btn.clicked.connect(func)
         return btn
+
+
+
 
     # --- 5. 动画与功能逻辑 (完整保留原有核心逻辑) ---
     def toggle_side_preview(self):
@@ -192,7 +236,10 @@ class BingoPacker(QMainWindow):
 
         self.anim_panel.start(); self.anim_panel_max.start()
         self.anim_win.start(); self.anim_win_max.start()
-        self.add_log(f"🎬 预览面板已{'收起' if is_expanded else '展开'}", "#a6e3a1")
+        # self.add_log(f"🎬 预览面板已{'收起' if is_expanded else '展开'}", "#a6e3a1")
+
+
+
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls(): event.accept()
@@ -304,6 +351,116 @@ class BingoPacker(QMainWindow):
         self.console.moveCursor(QTextCursor.End)
     def clear_all(self):
         self.selected_folders.clear(); self.console.clear(); self.add_log("♻️ 列表已清空", "#f38ba8")
+
+
+
+    def import_preview_assets(self):
+        """ 
+        实现步骤 1: 点击 upload 按钮导入文件并在列表中显示
+        """
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, 
+            "选择预览资源", 
+            "", 
+            "Bingo Assets (*.bgs *.sprite3)"
+        )
+        
+        if not file_paths:
+            return
+
+        found_new = 0
+        for path in file_paths:
+            path = os.path.normpath(path)
+            if path not in self.asset_files:
+                self.asset_files.append(path)
+                found_new += 1
+        
+        if found_new > 0:
+            self.refresh_asset_list()
+            self.add_log(f"📦 成功导入 {found_new} 个预览资源", "#cba6f7")
+
+    def refresh_asset_list(self, highlight_path=None):
+        """ 
+        刷新资源列表：
+        - 资源之间增加 margin-bottom 实现行间距
+        - 路径过长时自动显示省略号 (...)
+        """
+        self.res_list_display.clear()
+        
+        # 获取控件宽度，用于计算截断范围（略小于实际宽度以防溢出）
+        display_width = self.res_list_display.width() - 40 
+
+        html_content = ""
+        for path in self.asset_files:
+            file_name = os.path.basename(path)
+            ext = os.path.splitext(file_name)[1].lower()
+            icon_color = "#45b573" if ext == ".bgs" else "#d9793d"
+            
+            is_selected = (path == highlight_path)
+            bg_color = "#313244" if is_selected else "transparent"
+            
+            # 条目容器样式
+            item_style = (
+                f"background-color: {bg_color}; "
+                "margin-bottom: 12px; " 
+                "padding: 10px 12px; "
+                "display: block;"
+                
+            )
+            
+            # 路径文字样式：强制不换行 + 溢出隐藏 + 省略号
+            # width 是触发 ellipsis 的关键
+            path_style = (
+                f"width: {display_width}px; "
+                "color: #6c7086; "
+                "font-size: 10px; "
+                "text-overflow: ellipsis; "
+                "white-space: nowrap; "
+                "overflow: hidden; "
+                "display: inline-block;"
+            )
+
+            html_content += f"""
+            <div style="{item_style}">
+                <div style="white-space: nowrap; color: #cdd6f4; font-size: 13px; font-weight: bold;">
+                    <span style="color: {icon_color};">●</span> {file_name}
+                </div>
+                <div style="height: 4px;"></div>
+                <div style="{path_style}">
+                    &nbsp;&nbsp;&nbsp;{path}
+                </div>
+            </div>
+            """
+        
+        self.res_list_display.setHtml(html_content)
+
+
+    def on_res_list_click(self, event):
+        """ 捕获资源列表的点击事件并识别选中的文件 """
+        # 获取点击位置的光标
+        cursor = self.res_list_display.cursorForPosition(event.pos())
+        cursor.select(QTextCursor.BlockUnderCursor)
+        selected_text = cursor.selectedText().strip()
+
+        if not selected_text:
+            return
+
+        clicked_path = None
+        # 匹配路径逻辑
+        for path in self.asset_files:
+            if os.path.basename(path) in selected_text:
+                clicked_path = path
+                break
+
+        if clicked_path:
+            # 记录当前选中
+            self.current_selected_asset = clicked_path
+            self.add_log(f"🎯 已选中预览: {os.path.basename(clicked_path)}", "#89b4fa")
+            
+            # 关键：调用带参数的刷新函数来实现高亮视觉效果
+            self.refresh_asset_list(highlight_path=clicked_path)
+
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
