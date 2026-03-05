@@ -99,8 +99,8 @@ class BingoPacker(QMainWindow):
             ("◩ 裁切", self.on_slice_clicked, "#313244", "#fab387"),
             ("◎ 预览", self.toggle_side_preview, "#313244", "#a6e3a1"),
             ("spacer", None, None, None), 
-            ("⬢ 导出 .bgs", lambda: self.run_pack("BGS"), "#45b573", "#58ce87"),
-            ("⬡ 导出 .sprite3", lambda: self.run_pack("Sprite3"), "#d9793d", "#e68a4d")
+            ("导出 .bgs", lambda: self.run_pack("BGS"), "#45b573", "#58ce87"),
+            ("导出 .sprite3", lambda: self.run_pack("Sprite3"), "#d9793d", "#e68a4d")
         ]
 
         for text, func, bg, hover in btns_config:
@@ -187,15 +187,44 @@ class BingoPacker(QMainWindow):
         self.res_list_display.mousePressEvent = self.on_res_list_click
         res_container_layout.addWidget(self.res_list_display)
 
-        # 悬浮上传按钮
-        self.btn_upload = QPushButton("+", self.res_container)
+        # --- 右侧悬浮按钮组容器 ---
+        # 创建一个半透明或透明的容器来存放两个按钮
+        self.float_ctrl_container = QWidget(self.res_container)
+        self.float_ctrl_layout = QHBoxLayout(self.float_ctrl_container)
+        self.float_ctrl_layout.setContentsMargins(0, 0, 0, 0)
+        self.float_ctrl_layout.setSpacing(8) # 按钮之间的间距
+
+        # 1. 悬浮上传按钮 (原有的)
+        self.btn_upload = QPushButton("＋", self.float_ctrl_container)
         self.btn_upload.setFixedSize(32, 32)
+        self.btn_upload.setToolTip("导入预览资源")
         self.btn_upload.setCursor(Qt.PointingHandCursor)
         self.btn_upload.setStyleSheet("""
-            QPushButton { background-color: #313244; border: none; border-radius: 8px; font-size: 20px; padding-bottom: 2px; } 
+            QPushButton { background-color: #313244; color: #a6e3a1; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; } 
             QPushButton:hover { background-color: #45475a; }
         """)
         self.btn_upload.clicked.connect(self.import_preview_assets)
+
+        # 2. 悬浮清空按钮 (新增的)
+        self.btn_clear_list = QPushButton("×", self.float_ctrl_container)
+        self.btn_clear_list.setFixedSize(32, 32)
+        self.btn_clear_list.setToolTip("清空预览列表")
+        self.btn_clear_list.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_list.setStyleSheet("""
+            QPushButton { background-color: #313244; color: #f38ba8; border: none; border-radius: 8px; font-size: 20px; font-weight: bold; } 
+            QPushButton:hover { background-color: #45475a; }
+        """)
+        self.btn_clear_list.clicked.connect(self.clear_asset_list)
+
+        # 将按钮加入布局
+        self.float_ctrl_layout.addWidget(self.btn_upload)
+        self.float_ctrl_layout.addWidget(self.btn_clear_list)
+
+        # 设置容器大小并固定位置 (右下角)
+        self.float_ctrl_container.setFixedSize(72, 32) # 32*2 + 8 spacing
+
+        
+
         
         drawer_layout.addWidget(self.res_container)
         self.global_layout.addWidget(self.preview_drawer)
@@ -205,14 +234,32 @@ class BingoPacker(QMainWindow):
         self.play_timer.setInterval(self.speed_slider.value())
 
     def resizeEvent(self, event):
-        """ 确保上传按钮始终在资源列表的右下角 """
         super().resizeEvent(event)
-        if hasattr(self, 'btn_upload') and hasattr(self, 'res_container'):
-            margin = 10
-            self.btn_upload.move(
-                self.res_container.width() - self.btn_upload.width() - margin,
-                self.res_container.height() - self.btn_upload.height() - margin
+        # 调整悬浮按钮组的位置，距离右边缘 15px，底边缘 15px
+        if hasattr(self, 'float_ctrl_container'):
+            self.float_ctrl_container.move(
+                self.res_container.width() - self.float_ctrl_container.width() - 10,
+                self.res_container.height() - self.float_ctrl_container.height() - 10
             )
+
+    def clear_asset_list(self):
+        """彻底清空右侧预览列表及物理缓存"""
+        # 1. 统一变量名：使用代码中实际存在的 asset_files
+        self.asset_files = [] 
+        
+        # 2. 调用你现有的刷新逻辑来更新那个 QTextEdit (res_list_display)
+        self.refresh_asset_list()
+        
+        # 3. 停止播放器并重置预览屏
+        if hasattr(self, 'play_timer'):
+            self.play_timer.stop()
+        self.is_playing = False
+        self.btn_play.setText("▶")
+        self.preview_images = []
+        self.preview_screen.clear()
+        self.preview_screen.setText("<div style='color: #313244; font-size: 50px;'>∅</div>")
+        
+        self.add_log("♻️ 预览列表已彻底重置", "#f38ba8")
 
     def create_mini_btn(self, text, func):
         btn = QPushButton(text)
@@ -435,29 +482,24 @@ class BingoPacker(QMainWindow):
 
 
     def import_preview_assets(self):
-        """ 
-        实现步骤 1: 点击 upload 按钮导入文件并在列表中显示
-        """
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self, 
-            "选择预览资源", 
-            "", 
-            "Bingo Assets (*.bgs *.sprite3)"
+        """导入预览资源 - 修复同步 Bug"""
+        # 确保变量存在
+        if not hasattr(self, 'asset_files'):
+            self.asset_files = []
+
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择预览资源", "", "Bingo Files (*.bgs *.sprite3)"
         )
         
-        if not file_paths:
-            return
-
-        found_new = 0
-        for path in file_paths:
-            path = os.path.normpath(path)
-            if path not in self.asset_files:
-                self.asset_files.append(path)
-                found_new += 1
-        
-        if found_new > 0:
+        if files:
+            for f in files:
+                f = os.path.normpath(f)
+                if f not in self.asset_files:
+                    self.asset_files.append(f)
+            
+            # 关键：不要用 addItem，直接调用你写好的 HTML 刷新函数
             self.refresh_asset_list()
-            self.add_log(f"📦 成功导入 {found_new} 个预览资源", "#cba6f7")
+            self.add_log(f"✅ 成功追加 {len(files)} 个预览资源", "#a6e3a1")
 
     def refresh_asset_list(self, highlight_path=None):
         """ 
