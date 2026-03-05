@@ -5,7 +5,7 @@ import zipfile
 import hashlib
 import platform
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QPushButton, QTextEdit, QLabel, 
+                               QHBoxLayout, QPushButton, QTextEdit, QLabel, QSlider,
                                QFileDialog, QListView, QTreeView, QAbstractItemView, QFrame)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QIcon, QTextCursor, QPixmap
@@ -40,7 +40,7 @@ class BingoPacker(QMainWindow):
         self.is_playing = False
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.next_frame)
-        self.play_timer.setInterval(40)
+        self.play_timer.setInterval(80)
 
         self.setAcceptDrops(True)
         self.init_ui()
@@ -143,10 +143,10 @@ class BingoPacker(QMainWindow):
         drawer_layout.addWidget(self.preview_screen, 0, Qt.AlignCenter)
         
         # --- 播放控制条 (3按钮 + Slider) ---
+        # --- 播放控制条 (修正速度与滑块样式) ---
         playback_layout = QHBoxLayout()
         playback_layout.setSpacing(6)
         
-        # 仅保留上一帧、播放、下一帧
         self.btn_prev = self.create_mini_btn("⏮", self.prev_frame)
         self.btn_play = self.create_mini_btn("▶", self.toggle_playback)
         self.btn_next = self.create_mini_btn("⏭", self.next_frame)
@@ -154,17 +154,36 @@ class BingoPacker(QMainWindow):
         playback_layout.addWidget(self.btn_prev)
         playback_layout.addWidget(self.btn_play)
         playback_layout.addWidget(self.btn_next)
+        playback_layout.setContentsMargins(0, 5, 0, 5)
 
         # 速度调节滑块
-        from PySide6.QtWidgets import QSlider
         self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setMinimum(10)   # 10ms
-        self.speed_slider.setMaximum(300)  # 300ms
-        self.speed_slider.setValue(40)     # 默认约25fps
-        self.speed_slider.setInvertedAppearance(True) # 右滑变快
+        self.speed_slider.setMinimum(10)   
+        self.speed_slider.setMaximum(300)  
+        self.speed_slider.setValue(120)    # 【修正1】默认值设为 120ms，更符合视觉习惯
+        self.speed_slider.setInvertedAppearance(True) 
+        self.speed_slider.setTickPosition(QSlider.NoTicks) 
         self.speed_slider.setStyleSheet("""
-            QSlider::groove:horizontal { background: #313244; height: 4px; border-radius: 2px; }
-            QSlider::handle:horizontal { background: #89b4fa; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+            QSlider {
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                outline: none; /* 【修正2】消除虚线边框 */
+            }
+            QSlider::groove:horizontal { 
+                background: #313244; 
+                height: 4px; 
+                border-radius: 2px; 
+                margin: 0 6px; /* 【修正3】给轨道两头留出空间，消除手柄边缘的竖杠 */
+            }
+            QSlider::handle:horizontal { 
+                background: #89b4fa; 
+                width: 12px; 
+                height: 12px; 
+                margin: -4px 0; 
+                border-radius: 6px; 
+                border: none;
+            }
         """)
         self.speed_slider.valueChanged.connect(self.update_speed)
         playback_layout.addWidget(self.speed_slider)
@@ -192,11 +211,11 @@ class BingoPacker(QMainWindow):
         self.float_ctrl_container = QWidget(self.res_container)
         self.float_ctrl_layout = QHBoxLayout(self.float_ctrl_container)
         self.float_ctrl_layout.setContentsMargins(0, 0, 0, 0)
-        self.float_ctrl_layout.setSpacing(8) # 按钮之间的间距
+        self.float_ctrl_layout.setSpacing(0) # 按钮之间的间距
 
         # 1. 悬浮上传按钮 (原有的)
         self.btn_upload = QPushButton("＋", self.float_ctrl_container)
-        self.btn_upload.setFixedSize(32, 32)
+        self.btn_upload.setFixedSize(24, 24)
         self.btn_upload.setToolTip("导入预览资源")
         self.btn_upload.setCursor(Qt.PointingHandCursor)
         self.btn_upload.setStyleSheet("""
@@ -207,7 +226,7 @@ class BingoPacker(QMainWindow):
 
         # 2. 悬浮清空按钮 (新增的)
         self.btn_clear_list = QPushButton("×", self.float_ctrl_container)
-        self.btn_clear_list.setFixedSize(32, 32)
+        self.btn_clear_list.setFixedSize(24, 24)
         self.btn_clear_list.setToolTip("清空预览列表")
         self.btn_clear_list.setCursor(Qt.PointingHandCursor)
         self.btn_clear_list.setStyleSheet("""
@@ -238,8 +257,8 @@ class BingoPacker(QMainWindow):
         # 调整悬浮按钮组的位置，距离右边缘 15px，底边缘 15px
         if hasattr(self, 'float_ctrl_container'):
             self.float_ctrl_container.move(
-                self.res_container.width() - self.float_ctrl_container.width() - 10,
-                self.res_container.height() - self.float_ctrl_container.height() - 10
+                self.res_container.width() - self.float_ctrl_container.width() - 2,
+                self.res_container.height() - self.float_ctrl_container.height() - 2
             )
 
     def clear_asset_list(self):
@@ -482,8 +501,7 @@ class BingoPacker(QMainWindow):
 
 
     def import_preview_assets(self):
-        """导入预览资源 - 修复同步 Bug"""
-        # 确保变量存在
+        """导入预览资源 - 增加默认自动播放首项逻辑"""
         if not hasattr(self, 'asset_files'):
             self.asset_files = []
 
@@ -492,14 +510,25 @@ class BingoPacker(QMainWindow):
         )
         
         if files:
+            is_first_import = (len(self.asset_files) == 0) # 记录是否是清空后第一次导入
+            
             for f in files:
                 f = os.path.normpath(f)
                 if f not in self.asset_files:
                     self.asset_files.append(f)
             
-            # 关键：不要用 addItem，直接调用你写好的 HTML 刷新函数
+            # 刷新 UI 列表
             self.refresh_asset_list()
             self.add_log(f"✅ 成功追加 {len(files)} 个预览资源", "#a6e3a1")
+
+            # --- 新增逻辑：如果导入后列表不为空，默认播放第一项 ---
+            if self.asset_files:
+                first_path = self.asset_files[0]
+                self.current_selected_asset = first_path
+                # 高亮第一项
+                self.refresh_asset_list(highlight_path=first_path)
+                # 加载并自动播放 (你原有的 load_asset_preview 已包含 toggle_playback)
+                self.load_asset_preview(first_path)
 
     def refresh_asset_list(self, highlight_path=None):
         """ 
