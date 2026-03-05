@@ -33,6 +33,7 @@ class BingoPacker(QMainWindow):
         super().__init__()
         self.selected_folders = []
         self.asset_files = []
+        self.selected_images = []
         # 动画播放相关
         self.preview_images = []
         self.current_frame = 0
@@ -251,37 +252,83 @@ class BingoPacker(QMainWindow):
         else: event.ignore()
 
     def dropEvent(self, event):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-        found = 0
-        for f in files:
-            f = os.path.normpath(f)
-            if os.path.isdir(f) and f not in self.selected_folders:
-                self.selected_folders.append(f)
-                self.add_log(f"📥 拖拽载入: {os.path.basename(f)}", "#89b4fa")
-                found += 1
-        if found > 0: self.add_log(f"✅ 成功增加 {found} 个项目", "#a6e3a1")
+        urls = event.mimeData().urls()
+        f_dir, f_img = 0, 0
+        for u in urls:
+            path = os.path.normpath(u.toLocalFile())
+            if os.path.isdir(path) and path not in self.selected_folders:
+                self.selected_folders.append(path)
+                self.add_log(f"📁 文件夹: {os.path.basename(path)}", "#89b4fa")
+                f_dir += 1
+            elif os.path.isfile(path) and path.lower().endswith(".png"):
+                if path not in self.selected_images:
+                    self.selected_images.append(path)
+                    # 使用单帧图标标识
+                    self.add_log(f"🖼️ 单帧图片: {os.path.basename(path)}", "#fab387")
+                    f_img += 1
+        
+        if f_dir + f_img > 0:
+            self.add_log(f"✅ 已载入 {f_dir} 组序列 / {f_img} 个单帧", "#a6e3a1")
 
     def pick_folders(self):
         file_dialog = QFileDialog(self)
-        file_dialog.setWindowTitle("选择素材文件夹 (支持多选)")
+        file_dialog.setWindowTitle("选择素材 (文件夹或 PNG 图片)")
         file_dialog.setFileMode(QFileDialog.Directory)
-        file_dialog.setOption(QFileDialog.ShowDirsOnly, True)
-        file_dialog.setOption(QFileDialog.DontUseNativeDialog, True) 
+        file_dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        file_dialog.setNameFilter("All Files (*);;PNG Images (*.png)")
+
+        # --- 新增：修复对话框按钮样式 ---
+        file_dialog.setStyleSheet("""
+            /* 1. 修复按钮样式，取消加粗，增加内边距 */
+            QPushButton { 
+                font-weight: normal; 
+                padding: 4px 12px; 
+                min-width: 65px;
+                border: 1px solid #45475a;
+                margin-right: 5px; /* 给按钮右侧留一点空隙，避开手柄 */
+            }
+            QPushButton:hover { background-color: #45475a; }
+
+            /* 2. 彻底隐藏右下角的尺寸手柄，防止遮挡按钮 */
+            QSizeGrip {
+                width: 0px;
+                height: 0px;
+                background: transparent;
+            }
+
+            /* 3. 统一对话框内的列表样式（可选，为了更好看） */
+            QListView, QTreeView {
+                background-color: #181825;
+                border: 1px solid #313244;
+            }
+        """)
+
+        # 强制开启多选
         list_view = file_dialog.findChild(QListView, "listView")
-        if list_view: list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        if list_view:
+            list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         tree_view = file_dialog.findChild(QTreeView)
-        if tree_view: tree_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        if tree_view:
+            tree_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         if file_dialog.exec():
             paths = file_dialog.selectedFiles()
-            found = 0
+            f_dir, f_img = 0, 0
             for p in paths:
                 p = os.path.normpath(p)
                 if os.path.isdir(p) and p not in self.selected_folders:
                     self.selected_folders.append(p)
-                    self.add_log(f"📁 导入: {os.path.basename(p)}", "#89b4fa")
-                    found += 1
-            if found > 0: self.add_log(f"✅ 成功载入 {found} 个项目", "#a6e3a1")
+                    self.add_log(f"📁 文件夹: {os.path.basename(p)}", "#89b4fa")
+                    f_dir += 1
+                elif os.path.isfile(p) and p.lower().endswith(".png") and p not in self.selected_images:
+                    self.selected_images.append(p)
+                    self.add_log(f"🖼️ 单帧图片: {os.path.basename(p)}", "#fab387")
+                    f_img += 1
+            
+            if f_dir + f_img > 0:
+                self.add_log(f"✅ 成功导入 {f_dir} 目录 / {f_img} 图片", "#a6e3a1")
+
+    
 
     # 完整保留打包逻辑
     def process_bgs(self, source):
@@ -322,19 +369,39 @@ class BingoPacker(QMainWindow):
         except Exception as e: return False, str(e)
 
     def run_pack(self, mode):
-        if not self.selected_folders:
+        # 准备任务列表
+        tasks = [(f, "dir") for f in self.selected_folders] + [(i, "img") for i in self.selected_images]
+        
+        if not tasks:
             self.add_log("⚠️ 列表为空，请先导入！", "#fab387")
             return
-        self.add_log(f"🚀 开始执行 {mode} 打包...", "#94e2d5")
+
         sc = 0
-        for folder_path in self.selected_folders:
-            success, result = self.process_bgs(folder_path) if mode == "BGS" else self.process_sprite3(folder_path)
+        import shutil
+        for source, s_type in tasks:
+            if s_type == "dir":
+                # 文件夹直接打包
+                success, result = self.process_bgs(source) if mode == "BGS" else self.process_sprite3(source)
+            else:
+                # 单图处理：修正 temp_ 命名问题
+                img_name_with_ext = os.path.basename(source)
+                name_base = os.path.splitext(img_name_with_ext)[0]
+                
+                # 创建一个与图片同名的临时目录 (不再加 temp_ 前缀)
+                temp_dir = os.path.join(os.path.dirname(source), name_base)
+                os.makedirs(temp_dir, exist_ok=True)
+                shutil.copy(source, os.path.join(temp_dir, img_name_with_ext))
+                
+                # 打包
+                success, result = self.process_bgs(temp_dir) if mode == "BGS" else self.process_sprite3(temp_dir)
+                
+                # 清理
+                shutil.rmtree(temp_dir)
+
             if success:
                 self.add_log(f"✅ 生成成功: {os.path.basename(result)}", "#a6e3a1")
                 sc += 1
-            else:
-                self.add_log(f"❌ 失败 [{os.path.basename(folder_path)}]: {result}", "#f38ba8")
-        self.add_log(f"✨ 完成: 成功 {sc}/{len(self.selected_folders)}", "#fab387")
+        self.add_log(f"✨ 完成: 成功 {sc}/{len(tasks)}", "#fab387")
 
     # 播放控制逻辑
     def toggle_playback(self):
@@ -357,8 +424,13 @@ class BingoPacker(QMainWindow):
     def add_log(self, msg, color="#cdd6f4"):
         self.console.append(f'<span style="color:{color}">{msg}</span>')
         self.console.moveCursor(QTextCursor.End)
+
+
     def clear_all(self):
-        self.selected_folders.clear(); self.console.clear(); self.add_log("♻️ 列表已清空", "#f38ba8")
+        self.selected_folders.clear()
+        self.selected_images.clear() # 也要清理单图
+        self.console.clear()
+        self.add_log("♻️ 列表已清空", "#f38ba8")
 
 
 
