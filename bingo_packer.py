@@ -39,7 +39,7 @@ class BingoPacker(QMainWindow):
         self.is_playing = False
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.next_frame)
-        self.play_timer.setInterval(100)
+        self.play_timer.setInterval(40)
 
         self.setAcceptDrops(True)
         self.init_ui()
@@ -345,6 +345,9 @@ class BingoPacker(QMainWindow):
     def prev_frame(self): 
         if self.preview_images: self.current_frame = (self.current_frame - 1) % len(self.preview_images); self.update_display()
     def update_display(self): pass
+
+
+
     def on_slice_clicked(self): self.add_log("✂️ 智能裁切功能待接入", "#fab387")
     def add_log(self, msg, color="#cdd6f4"):
         self.console.append(f'<span style="color:{color}">{msg}</span>')
@@ -436,29 +439,85 @@ class BingoPacker(QMainWindow):
 
 
     def on_res_list_click(self, event):
-        """ 捕获资源列表的点击事件并识别选中的文件 """
-        # 获取点击位置的光标
         cursor = self.res_list_display.cursorForPosition(event.pos())
         cursor.select(QTextCursor.BlockUnderCursor)
         selected_text = cursor.selectedText().strip()
 
-        if not selected_text:
-            return
+        if not selected_text: return
 
         clicked_path = None
-        # 匹配路径逻辑
         for path in self.asset_files:
             if os.path.basename(path) in selected_text:
                 clicked_path = path
                 break
 
         if clicked_path:
-            # 记录当前选中
             self.current_selected_asset = clicked_path
-            self.add_log(f"🎯 已选中预览: {os.path.basename(clicked_path)}", "#89b4fa")
-            
-            # 关键：调用带参数的刷新函数来实现高亮视觉效果
             self.refresh_asset_list(highlight_path=clicked_path)
+            # --- 新增：加载预览资源 ---
+            self.load_asset_preview(clicked_path)
+    
+    def load_asset_preview(self, file_path):
+        """解析 .bgs 或 .sprite3 文件并加载图片序列"""
+        self.play_timer.stop()
+        self.is_playing = False
+        self.btn_play.setText("▶")
+        self.preview_images = []
+        self.current_frame = 0
+
+        try:
+            with zipfile.ZipFile(file_path, 'r') as z:
+                # 逻辑 A: 处理 .bgs (自研格式)
+                if file_path.lower().endswith(".bgs"):
+                    if "config.json" in z.namelist():
+                        config = json.loads(z.read("config.json").decode('utf-8'))
+                        # 按照 config.json 里的 costumes 顺序加载
+                        for costume in config.get("costumes", []):
+                            img_name = costume.get("file")
+                            if img_name in z.namelist():
+                                pix = QPixmap()
+                                pix.loadFromData(z.read(img_name))
+                                self.preview_images.append(pix)
+                
+                # 逻辑 B: 处理 .sprite3 (Scratch 格式)
+                elif file_path.lower().endswith(".sprite3"):
+                    if "sprite.json" in z.namelist():
+                        s_json = json.loads(z.read("sprite.json").decode('utf-8'))
+                        for costume in s_json.get("costumes", []):
+                            md5ext = costume.get("md5ext")
+                            if md5ext in z.namelist():
+                                pix = QPixmap()
+                                pix.loadFromData(z.read(md5ext))
+                                self.preview_images.append(pix)
+
+            if self.preview_images:
+                self.add_log(f"🎬 预览已载入: {len(self.preview_images)} 帧", "#a6e3a1")
+                self.update_display()
+
+                if not self.is_playing:
+                    self.toggle_playback() # 自动开始播放并更新按钮状态为 ⏸
+            else:
+                self.add_log("❌ 资源内未找到有效帧", "#f38ba8")
+                self.preview_screen.setText("🎬")
+
+        except Exception as e:
+            self.add_log(f"❌ 加载失败: {str(e)}", "#f38ba8")
+    
+    def update_display(self):
+        """更新预览窗口的图像显示 - 优化像素锐利度"""
+        if not self.preview_images:
+            return
+        
+        pixmap = self.preview_images[self.current_frame]
+        
+        # 核心修改：使用 FastTransformation 保持像素锐利，不进行平滑模糊处理
+        scaled_pixmap = pixmap.scaled(
+            self.preview_screen.size(), 
+            Qt.KeepAspectRatio, 
+            Qt.FastTransformation  # 关键：像素风格必须用这个
+        )
+        
+        self.preview_screen.setPixmap(scaled_pixmap)
 
 
 
