@@ -6,36 +6,22 @@ import hashlib
 import platform
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QTextEdit, QLabel, 
-                               QFileDialog, QListView, QTreeView, QAbstractItemView)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QTextCursor
+                               QFileDialog, QListView, QTreeView, QAbstractItemView, QFrame)
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtGui import QIcon, QTextCursor, QPixmap
 
+# --- 1. 资源路径与环境锁定逻辑 (完整保留) ---
 def get_resource_path(relative_path):
-    """ 
-    超强兼容的资源获取逻辑：
-    1. 适配 Windows PyInstaller --onefile (%TEMP% 目录)
-    2. 适配 macOS .app Bundle (Contents/Resources 目录)
-    3. 适配本地开发环境
-    """
-    # Windows PyInstaller 临时目录
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
-    
-    # macOS .app 束资源目录检测
     if platform.system() == "Darwin":
-        # 获取二进制文件所在目录 (Contents/MacOS)
         main_dir = os.path.dirname(sys.executable)
-        # 指向 Contents/Resources
         mac_res_path = os.path.join(os.path.dirname(main_dir), 'Resources', relative_path)
         if os.path.exists(mac_res_path):
             return mac_res_path
-
-    # 本地环境或 fallback
     return os.path.join(os.path.abspath("."), relative_path)
 
-# --- 路径环境锁定 ---
 if getattr(sys, 'frozen', False):
-    # 强制将工作目录设为程序本体所在目录，防止双击启动时路径偏移
     bundle_dir = os.path.dirname(sys.executable)
     os.chdir(bundle_dir)
 else:
@@ -46,132 +32,171 @@ class BingoPacker(QMainWindow):
     def __init__(self):
         super().__init__()
         self.selected_folders = []
-        # 启用窗口拖拽接收功能
+        # 动画播放相关
+        self.preview_images = []
+        self.current_frame = 0
+        self.is_playing = False
+        self.play_timer = QTimer()
+        self.play_timer.timeout.connect(self.next_frame)
+        self.play_timer.setInterval(100)
+
         self.setAcceptDrops(True)
         self.init_ui()
 
     def init_ui(self):
-        # 1. 窗口属性锁定
+        # --- 2. 窗口初始化与 QSS 样式 (完整保留) ---
         self.setWindowTitle("Bingo Sprite Packer")
-        self.setFixedSize(760, 620)
+        self.setFixedWidth(760)
+        self.setFixedHeight(620)
 
         icon_path = get_resource_path("logo.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        # 完美保留 QSS 样式设计
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
-            
-            /* 禁用右下角的缩放手柄，解决按钮被遮挡问题 */
-            QSizeGrip {
-                width: 0;
-                height: 0;
-                image: none;
-            }
-
-            /* 修复对话框内容 */
+            QSizeGrip { width: 0; height: 0; image: none; }
             QFileDialog QAbstractItemView {
-                background-color: #181825;
-                color: #cdd6f4;
-                border: 1px solid #313244;
-                border-radius: 8px;
+                background-color: #181825; color: #cdd6f4;
+                border: 1px solid #313244; border-radius: 8px;
             }
             QFileDialog QPushButton {
-                background-color: #313244;
-                color: white;
-                border-radius: 6px;
-                padding: 5px 12px;
-                min-width: 60px;
+                background-color: #313244; color: white;
+                border-radius: 6px; padding: 5px 12px; min-width: 60px;
             }
-            QFileDialog QPushButton:hover {
-                background-color: #45475a;
-            }
-            
-            QFileDialog QHeaderView::section {
-                background-color: #313244;
-                color: #cdd6f4;
-                padding: 4px;
-                border: none;
-            }
-            
+            QFileDialog QPushButton:hover { background-color: #45475a; }
+            QFileDialog QHeaderView::section { background-color: #313244; color: #cdd6f4; padding: 4px; border: none; }
             QFileDialog QLineEdit {
-                background-color: #11111b;
-                color: #cdd6f4;
-                border: 1px solid #313244;
-                border-radius: 4px;
-                padding: 2px;
+                background-color: #11111b; color: #cdd6f4;
+                border: 1px solid #313244; border-radius: 4px; padding: 2px;
             }
             QFileDialog QLabel { color: #cdd6f4; }
         """)
-        
-        # 图标处理：Mac 下通常打包为 .app，logo.ico 会被自动转换，这里保留逻辑
-        if os.path.exists("logo.ico"):
-            self.setWindowIcon(QIcon("logo.ico"))
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.global_layout = QHBoxLayout(self.central_widget)
+        self.global_layout.setContentsMargins(0, 0, 0, 0)
+        self.global_layout.setSpacing(0)
+
+        # --- 3. 左侧主功能区 (保持原有 760 布局) ---
+        self.main_container = QWidget()
+        self.main_container.setFixedWidth(760)
+        main_layout = QVBoxLayout(self.main_container)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
         header = QLabel("BLOCKBINGO 资产打包工具")
-        # PySide6 中的对齐方式写法
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #89b4fa; font-size: 24px; font-weight: bold; font-family: 'Microsoft YaHei', 'PingFang SC';")
         main_layout.addWidget(header)
 
-        # 日志控制台
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setPlaceholderText("可直接将文件夹拖拽至此处导入...")
         self.console.setStyleSheet("""
             QTextEdit {
-                background-color: #181825;
-                border: 1px solid #313244;
-                border-radius: 12px;
-                padding: 10px;
-                color: #cdd6f4;
-                font-family: 'Consolas', 'Menlo', 'monospace';
-                font-size: 16px;
+                background-color: #181825; border: 1px solid #313244; border-radius: 12px;
+                padding: 10px; color: #cdd6f4; font-family: 'Consolas', 'Menlo', 'monospace'; font-size: 16px;
             }
         """)
         main_layout.addWidget(self.console)
 
-        # 底部动作条
+        # 底部动作条 (带色彩逻辑的按钮)
         button_layout = QHBoxLayout()
-        # 适配 Mac 的按钮字体
-        btn_style = "QPushButton { border-radius: 8px; padding: 8px 15px; color: white; font-weight: bold; font-family: 'Microsoft YaHei', 'PingFang SC'; }"
+        btn_base_style = "QPushButton { border-radius: 8px; padding: 8px 12px; color: white; font-weight: bold; font-family: 'Microsoft YaHei', 'PingFang SC'; }"
         
-        self.btn_import = QPushButton(" 导入")
-        self.btn_import.setStyleSheet(btn_style + "QPushButton { background-color: #313244; } QPushButton:hover { background-color: #45475a; }")
-        self.btn_import.clicked.connect(self.pick_folders)
+        # 按钮定义配置 (合并了旧逻辑与新 UI)
+        btns_config = [
+            (" 导入", self.pick_folders, "#313244", "#45475a"),
+            (" 清空", self.clear_all, "#313244", "#f38ba8"),
+            (" ✂️ 裁切", self.on_slice_clicked, "#313244", "#fab387"),
+            (" 👁️ 预览", self.toggle_side_preview, "#313244", "#a6e3a1"),
+            ("spacer", None, None, None), 
+            (" 导出 .bgs", lambda: self.run_pack("BGS"), "#45b573", "#58ce87"),
+            (" 导出 .sprite3", lambda: self.run_pack("Sprite3"), "#d9793d", "#e68a4d")
+        ]
 
-        self.btn_clear = QPushButton(" 清空")
-        self.btn_clear.setStyleSheet(btn_style + "QPushButton { background-color: #313244; } QPushButton:hover { background-color: #f38ba8; }")
-        self.btn_clear.clicked.connect(self.clear_all)
+        for text, func, bg, hover in btns_config:
+            if text == "spacer":
+                button_layout.addStretch()
+                continue
+            btn = QPushButton(text)
+            btn.setStyleSheet(f"{btn_base_style} QPushButton {{ background-color: {bg}; }} QPushButton:hover {{ background-color: {hover}; }}")
+            btn.clicked.connect(func)
+            button_layout.addWidget(btn)
 
-        self.btn_bgs = QPushButton(" 导出 .bgs")
-        self.btn_bgs.setStyleSheet(btn_style + "QPushButton { background-color: #45b573; } QPushButton:hover { background-color: #58ce87; }")
-        self.btn_bgs.clicked.connect(lambda: self.run_pack("BGS"))
-
-        self.btn_s3 = QPushButton(" 导出 .sprite3")
-        self.btn_s3.setStyleSheet(btn_style + "QPushButton { background-color: #d9793d; } QPushButton:hover { background-color: #e68a4d; }")
-        self.btn_s3.clicked.connect(lambda: self.run_pack("Sprite3"))
-
-        button_layout.addWidget(self.btn_import)
-        button_layout.addWidget(self.btn_clear)
-        button_layout.addStretch()
-        button_layout.addWidget(self.btn_bgs)
-        button_layout.addWidget(self.btn_s3)
         main_layout.addLayout(button_layout)
+        self.global_layout.addWidget(self.main_container)
 
-    # --- 拖拽识别逻辑 ---
+        # --- 4. 右侧预览管理面板 (完整新 UI 设计) ---
+        self.preview_drawer = QFrame()
+        self.preview_drawer.setFixedWidth(0)
+        self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 1px solid #313244;")
+        drawer_layout = QVBoxLayout(self.preview_drawer)
+        drawer_layout.setContentsMargins(12, 15, 12, 15)
+        drawer_layout.setSpacing(8)
+
+        title = QLabel("动画预览")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #89b4fa; font-weight: bold; border: none; font-size: 14px; margin-bottom: 2px;")
+        drawer_layout.addWidget(title)
+
+        self.preview_screen = QLabel("🎬")
+        self.preview_screen.setFixedSize(256, 256)
+        self.preview_screen.setAlignment(Qt.AlignCenter)
+        self.preview_screen.setStyleSheet("background-color: #000000; border-radius: 6px; border: 1px solid #313244; color: #45475a;")
+        drawer_layout.addWidget(self.preview_screen, 0, Qt.AlignCenter)
+
+        playback_layout = QHBoxLayout()
+        playback_layout.setSpacing(4)
+        self.btn_first = self.create_mini_btn("⏮", self.first_frame)
+        self.btn_prev = self.create_mini_btn("◀", self.prev_frame)
+        self.btn_play = self.create_mini_btn("▶", self.toggle_playback)
+        self.btn_next = self.create_mini_btn("▶️", self.next_frame)
+        self.btn_last = self.create_mini_btn("⏭", self.last_frame)
+        for b in [self.btn_first, self.btn_prev, self.btn_play, self.btn_next, self.btn_last]:
+            playback_layout.addWidget(b)
+        drawer_layout.addLayout(playback_layout)
+
+        self.res_list_display = QTextEdit()
+        self.res_list_display.setReadOnly(True)
+        self.res_list_display.setPlaceholderText("待加载资源序列...")
+        self.res_list_display.setStyleSheet("background-color: #181825; border: 1px solid #313244; font-size: 12px; color: #a6adc8;")
+        drawer_layout.addWidget(self.res_list_display)
+        
+        self.global_layout.addWidget(self.preview_drawer)
+
+    def create_mini_btn(self, text, func):
+        btn = QPushButton(text)
+        btn.setFixedSize(40, 24)
+        btn.setStyleSheet("font-size: 12px; background-color: #1e1e2e; border: 1px solid #313244; padding: 0px;")
+        btn.clicked.connect(func)
+        return btn
+
+    # --- 5. 动画与功能逻辑 (完整保留原有核心逻辑) ---
+    def toggle_side_preview(self):
+        is_expanded = self.preview_drawer.width() > 0
+        target_panel_w = 0 if is_expanded else 280
+        target_win_w = 760 if is_expanded else 760 + 280
+
+        self.anim_panel = QPropertyAnimation(self.preview_drawer, b"minimumWidth")
+        self.anim_panel_max = QPropertyAnimation(self.preview_drawer, b"maximumWidth")
+        self.anim_win = QPropertyAnimation(self, b"minimumWidth")
+        self.anim_win_max = QPropertyAnimation(self, b"maximumWidth")
+
+        for a in [self.anim_panel, self.anim_panel_max, self.anim_win, self.anim_win_max]:
+            a.setDuration(300)
+            a.setEasingCurve(QEasingCurve.OutCubic)
+            a.setEndValue(target_win_w if a.targetObject() == self else target_panel_w)
+
+        self.anim_panel.start(); self.anim_panel_max.start()
+        self.anim_win.start(); self.anim_win_max.start()
+        self.add_log(f"🎬 预览面板已{'收起' if is_expanded else '展开'}", "#a6e3a1")
+
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
+        if event.mimeData().hasUrls(): event.accept()
+        else: event.ignore()
 
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
@@ -182,18 +207,7 @@ class BingoPacker(QMainWindow):
                 self.selected_folders.append(f)
                 self.add_log(f"📥 拖拽载入: {os.path.basename(f)}", "#89b4fa")
                 found += 1
-        if found > 0:
-            self.add_log(f"✅ 成功增加 {found} 个项目", "#a6e3a1")
-
-    # --- 核心功能逻辑 ---
-    def add_log(self, msg, color="#cdd6f4"):
-        self.console.append(f'<span style="color:{color}">{msg}</span>')
-        self.console.moveCursor(QTextCursor.End)
-
-    def clear_all(self):
-        self.selected_folders.clear()
-        self.console.clear()
-        self.add_log("♻️ 列表已清空", "#f38ba8")
+        if found > 0: self.add_log(f"✅ 成功增加 {found} 个项目", "#a6e3a1")
 
     def pick_folders(self):
         file_dialog = QFileDialog(self)
@@ -201,14 +215,10 @@ class BingoPacker(QMainWindow):
         file_dialog.setFileMode(QFileDialog.Directory)
         file_dialog.setOption(QFileDialog.ShowDirsOnly, True)
         file_dialog.setOption(QFileDialog.DontUseNativeDialog, True) 
-        
-        # 兼容 PySide6 的多选开启方式
         list_view = file_dialog.findChild(QListView, "listView")
-        if list_view:
-            list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        if list_view: list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         tree_view = file_dialog.findChild(QTreeView)
-        if tree_view:
-            tree_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        if tree_view: tree_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         if file_dialog.exec():
             paths = file_dialog.selectedFiles()
@@ -219,10 +229,9 @@ class BingoPacker(QMainWindow):
                     self.selected_folders.append(p)
                     self.add_log(f"📁 导入: {os.path.basename(p)}", "#89b4fa")
                     found += 1
-            if found > 0:
-                self.add_log(f"✅ 成功载入 {found} 个项目", "#a6e3a1")
+            if found > 0: self.add_log(f"✅ 成功载入 {found} 个项目", "#a6e3a1")
 
-    # 保留无损打包逻辑
+    # 完整保留打包逻辑
     def process_bgs(self, source):
         try:
             name = os.path.basename(source)
@@ -275,9 +284,29 @@ class BingoPacker(QMainWindow):
                 self.add_log(f"❌ 失败 [{os.path.basename(folder_path)}]: {result}", "#f38ba8")
         self.add_log(f"✨ 完成: 成功 {sc}/{len(self.selected_folders)}", "#fab387")
 
+    # 播放控制逻辑
+    def toggle_playback(self):
+        self.is_playing = not self.is_playing
+        self.btn_play.setText("⏸" if self.is_playing else "▶")
+        if self.is_playing: self.play_timer.start()
+        else: self.play_timer.stop()
+
+    def first_frame(self): self.current_frame = 0; self.update_display()
+    def last_frame(self): self.current_frame = len(self.preview_images)-1; self.update_display()
+    def next_frame(self): 
+        if self.preview_images: self.current_frame = (self.current_frame + 1) % len(self.preview_images); self.update_display()
+    def prev_frame(self): 
+        if self.preview_images: self.current_frame = (self.current_frame - 1) % len(self.preview_images); self.update_display()
+    def update_display(self): pass
+    def on_slice_clicked(self): self.add_log("✂️ 智能裁切功能待接入", "#fab387")
+    def add_log(self, msg, color="#cdd6f4"):
+        self.console.append(f'<span style="color:{color}">{msg}</span>')
+        self.console.moveCursor(QTextCursor.End)
+    def clear_all(self):
+        self.selected_folders.clear(); self.console.clear(); self.add_log("♻️ 列表已清空", "#f38ba8")
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # Fusion 样式在 Mac 上能保持深色外观的统一性
     app.setStyle("Fusion")
     window = BingoPacker()
     window.show()
