@@ -778,25 +778,39 @@ class BingoPacker(QMainWindow):
     
     def on_slice_clicked(self):
         """
-        核心裁切逻辑：
-        1. 自动计算最大切片边长 + 10px 预留空间
-        2. 强制画布为偶数尺寸（更有利于中心对齐）
-        3. 文件夹名 = PNG文件名，帧名 = PNG文件名_序号
+        极简工业风（带结果反馈版）：
+        - 智能裁切 ->
+        - ■■■■■■■■■■■■■■■■■■■■  [100.0%]
+        - 处理完成 
+        - 文件夹: 洛克人
         """
         if not self.selected_images:
-            self.add_log("⚠️ 列表中没有单张图片，请先导入 PNG！", "#f38ba8")
+            self.add_log("- ⚠️ 待处理列表为空，请先导入 PNG 素材", "#f38ba8")
             return
 
         import cv2
         import numpy as np
         from PIL import Image
 
-        self.add_log(f"- 开始智能适配裁切 (Padding: 10px)...", "#fab387")
+        self.console.setFontFamily("'Consolas', 'Monaco', 'Courier New', monospace")
+
+        total_imgs = len(self.selected_images)
+        self.add_log("- 智能裁切 ->", "#89b4fa")
         
         sliced_count = 0
-        for img_path in self.selected_images[:]:
+        new_folders = [] # 记录本次裁切生成的文件夹名称
+
+        for i, img_path in enumerate(self.selected_images[:]):
             try:
-                # --- A. 准备工作 ---
+                # --- 1. 进度视觉设计 ---
+                current_idx = i + 1
+                percent = current_idx / total_imgs
+                bar_width = 30 
+                filled = int(bar_width * percent)
+                bar_content = "■" * filled + "∙" * (bar_width - filled)
+                progress_info = f"- {bar_content}  [{percent*100:>5.1f}%]"
+                
+                # --- 2. 裁切路径准备 ---
                 img_name_with_ext = os.path.basename(img_path)
                 name_base = os.path.splitext(img_name_with_ext)[0]
                 output_dir = os.path.join(os.path.dirname(img_path), name_base)
@@ -804,72 +818,57 @@ class BingoPacker(QMainWindow):
                 src = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
                 if src is None: continue
                 
-                # 提取遮罩
                 alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-
-                # 寻找轮廓
                 contours, _ = cv2.findContours(alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if not contours:
-                    self.add_log(f"❓ {name_base} 未识别到有效内容", "#f38ba8")
-                    continue
+                
+                if not contours: continue
 
-                # --- B. 动态计算画布尺寸 (重点修改区) ---
+                # (中间的裁切计算逻辑保持不变...)
                 max_w, max_h = 0, 0
                 valid_rects = []
                 for cnt in contours:
-                    x, y, w, h = cv2.boundingRect(cnt) #
+                    x, y, w, h = cv2.boundingRect(cnt)
                     if w < 2 or h < 2: continue 
                     max_w = max(max_w, w)
                     max_h = max(max_h, h)
                     valid_rects.append((x, y, w, h))
 
-                # 设置预留尺寸 (Padding)
-                # 每边留 5px，总共加 10px
                 padding = 8 
                 side_length = max(max_w, max_h) + padding
-                
-                # 强制修正为偶数：这能确保 (side_length - w) // 2 得到的偏移量更对称
-                if side_length % 2 != 0:
-                    side_length += 1
-                
+                if side_length % 2 != 0: side_length += 1
                 target_size = (side_length, side_length)
-                
-                # 排序轮廓：先从上到下，再从左到右
                 valid_rects.sort(key=lambda r: (r[1], r[0]))
 
-                # --- C. 执行裁切与保存 ---
                 os.makedirs(output_dir, exist_ok=True)
                 pil_img = Image.open(img_path).convert("RGBA")
                 
                 for idx, (x, y, w, h) in enumerate(valid_rects):
-                    # 裁切出该块内容
                     sprite_crop = pil_img.crop((x, y, x + w, y + h))
-                    
-                    # 创建带有 Padding 的画布
                     final_canvas = Image.new("RGBA", target_size, (0, 0, 0, 0))
-                    
-                    # 计算居中坐标
                     offset_x = (side_length - w) // 2
                     offset_y = (side_length - h) // 2
                     final_canvas.paste(sprite_crop, (offset_x, offset_y), sprite_crop)
-
-                    # 帧命名：原文件名_序列
                     save_name = f"{name_base}_{idx:02d}.png"
                     final_canvas.save(os.path.join(output_dir, save_name))
 
-                # --- D. 收尾 ---
-                self.add_log(f"- {name_base} 已处理: 最终尺寸 {side_length}px", "#a6e3a1")
-                
+                # --- 3. 更新反馈与状态 ---
+                self.add_log(progress_info, "#74c7ec") 
+                QApplication.processEvents()
+
                 if output_dir not in self.selected_folders:
                     self.selected_folders.append(output_dir)
+                    new_folders.append(name_base) # 记录生成的文件夹名
                 
                 self.selected_images.remove(img_path)
                 sliced_count += 1
 
             except Exception as e:
-                self.add_log(f"❌ 裁切出错 {name_base}: {str(e)}", "#f38ba8")
+                self.add_log(f"- 错误: {os.path.basename(img_path)}", "#f38ba8")
 
-        self.add_log(f"- 成功产出 {sliced_count} 组序列帧", "#a6e3a1")
+        # --- 4. 最终结果汇总 ---
+        self.add_log("- 处理完成", "#a6e3a1")
+        for folder_name in new_folders:
+            self.add_log(f"- 文件夹 : {folder_name}", "#89b4fa") # 使用蓝色显示生成的文件夹 # 结束语颜色-绿色
     
 
     def res_dragEnterEvent(self, event):
@@ -960,6 +959,20 @@ class BingoPacker(QMainWindow):
         self.is_full_scale = not self.is_full_scale
         # 立即刷新当前帧以看到效果
         self.update_display()
+
+    def get_pip_style_bar(self, current, total):
+        """ 生成 pip 风格的进度条字符串 """
+        width = 30  # 进度条总长度
+        progress = current / total
+        filled_width = int(width * progress)
+        
+        # 使用 pip 风格的字符：实心 ━ 和 空心 ━
+        # 也可以用 █
+        bar = "━" * filled_width + " " * (width - filled_width)
+        percent = progress * 100
+        
+        return f" {percent:3.0f}% |{bar}| {current}/{total}"
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
