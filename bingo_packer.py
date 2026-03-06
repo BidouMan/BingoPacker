@@ -304,7 +304,7 @@ class BingoPacker(QMainWindow):
         self.preview_screen.clear()
         self.preview_screen.setText("<div style='color: #313244; font-size: 50px;'>∅</div>")
         
-        self.add_log("♻️ 预览列表已彻底重置", "#f38ba8")
+        # self.add_log("- 预览列表已彻底重置", "#f38ba8")
 
     def create_mini_btn(self, text, func):
         btn = QPushButton(text)
@@ -350,17 +350,17 @@ class BingoPacker(QMainWindow):
             path = os.path.normpath(u.toLocalFile())
             if os.path.isdir(path) and path not in self.selected_folders:
                 self.selected_folders.append(path)
-                self.add_log(f"📁 📌📔🔺🔸🔹🎯🎟🔖📨📦📤📗📙📘文件夹: {os.path.basename(path)}", "#89b4fa")
+                self.add_log(f"- 文件夹: {os.path.basename(path)}", "#89b4fa")
                 f_dir += 1
             elif os.path.isfile(path) and path.lower().endswith(".png"):
                 if path not in self.selected_images:
                     self.selected_images.append(path)
                     # 使用单帧图标标识
-                    self.add_log(f"🖼️ 单帧图片: {os.path.basename(path)}", "#fab387")
+                    self.add_log(f"- 单帧图片: {os.path.basename(path)}", "#fab387")
                     f_img += 1
         
         # if f_dir + f_img > 0:
-        #     self.add_log(f"✅ 已载入 {f_dir} 组序列 / {f_img} 个单帧", "#a6e3a1")
+        #     self.add_log(f"- 已载入 {f_dir} 组序列 / {f_img} 个单帧", "#a6e3a1")
 
     def pick_folders(self):
         file_dialog = QFileDialog(self)
@@ -410,15 +410,14 @@ class BingoPacker(QMainWindow):
                 p = os.path.normpath(p)
                 if os.path.isdir(p) and p not in self.selected_folders:
                     self.selected_folders.append(p)
-                    self.add_log(f"📁 文件夹: {os.path.basename(p)}", "#89b4fa")
+                    self.add_log(f"- 文件夹: {os.path.basename(p)}", "#89b4fa")
                     f_dir += 1
                 elif os.path.isfile(p) and p.lower().endswith(".png") and p not in self.selected_images:
                     self.selected_images.append(p)
-                    self.add_log(f"🖼️ 单帧图片: {os.path.basename(p)}", "#fab387")
+                    self.add_log(f"- 单帧图片: {os.path.basename(p)}", "#fab387")
                     f_img += 1
             
-            if f_dir + f_img > 0:
-                self.add_log(f"✅ 成功导入 {f_dir} 目录 / {f_img} 图片", "#a6e3a1")
+
 
     
 
@@ -491,9 +490,9 @@ class BingoPacker(QMainWindow):
                 shutil.rmtree(temp_dir)
 
             if success:
-                self.add_log(f"✅ 生成成功: {os.path.basename(result)}", "#a6e3a1")
+                self.add_log(f"- 生成成功: {os.path.basename(result)}", "#a6e3a1")
                 sc += 1
-        self.add_log(f"✨ 完成: 成功 {sc}/{len(tasks)}", "#fab387")
+        self.add_log(f"- 完成: 成功 {sc}/{len(tasks)}", "#fab387")
 
     # 播放控制逻辑
     def toggle_playback(self):
@@ -531,7 +530,7 @@ class BingoPacker(QMainWindow):
         self.selected_folders.clear()
         self.selected_images.clear() # 也要清理单图
         self.console.clear()
-        self.add_log("♻️ 列表已清空", "#f38ba8")
+        self.add_log("♻️  列表已清空", "#f38ba8")
 
 
 
@@ -555,7 +554,7 @@ class BingoPacker(QMainWindow):
             
             if added_files:
                 self.refresh_asset_list()
-                self.add_log(f"✅ 成功追加 {len(added_files)} 个预览资源", "#a6e3a1")
+                self.add_log(f"- 成功追加 {len(added_files)} 个预览资源", "#a6e3a1")
 
                 # --- 核心修改：永远预览本次导入的最末尾一项 ---
                 last_path = added_files[-1] 
@@ -667,7 +666,7 @@ class BingoPacker(QMainWindow):
                                 self.preview_images.append(pix)
 
             if self.preview_images:
-                self.add_log(f"🎬 预览已载入: {len(self.preview_images)} 帧", "#a6e3a1")
+                self.add_log(f"- 预览已载入: {len(self.preview_images)} 帧", "#a6e3a1")
                 self.update_display()
 
                 if not self.is_playing:
@@ -711,7 +710,7 @@ class BingoPacker(QMainWindow):
         import numpy as np
         from PIL import Image
 
-        self.add_log(f"✂️ 开始智能适配裁切 (Padding: 10px)...", "#fab387")
+        self.add_log(f"- 开始智能适配裁切 (Padding: 10px)...", "#fab387")
         
         sliced_count = 0
         for img_path in self.selected_images[:]:
@@ -778,7 +777,7 @@ class BingoPacker(QMainWindow):
                     final_canvas.save(os.path.join(output_dir, save_name))
 
                 # --- D. 收尾 ---
-                self.add_log(f"✨ {name_base} 已处理: 最终尺寸 {side_length}px", "#a6e3a1")
+                self.add_log(f"- {name_base} 已处理: 最终尺寸 {side_length}px", "#a6e3a1")
                 
                 if output_dir not in self.selected_folders:
                     self.selected_folders.append(output_dir)
@@ -789,7 +788,7 @@ class BingoPacker(QMainWindow):
             except Exception as e:
                 self.add_log(f"❌ 裁切出错 {name_base}: {str(e)}", "#f38ba8")
 
-        self.add_log(f"✅ 成功产出 {sliced_count} 组序列帧", "#a6e3a1")
+        self.add_log(f"- 成功产出 {sliced_count} 组序列帧", "#a6e3a1")
     
 
     def res_dragEnterEvent(self, event):
@@ -825,7 +824,7 @@ class BingoPacker(QMainWindow):
         if new_files:
             # 【注意】：这里千万不要写 self.asset_files.sort()
             self.refresh_asset_list()
-            self.add_log(f"📥 拖拽导入 {len(new_files)} 个预览资源", "#a6e3a1")
+            self.add_log(f"- 拖拽导入 {len(new_files)} 个预览资源", "#a6e3a1")
             
             # 无论之前是否有文件，永远播放本次拖入的最末尾一个
             last_path = new_files[-1]
