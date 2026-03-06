@@ -201,9 +201,20 @@ class BingoPacker(QMainWindow):
         self.res_list_display.setReadOnly(True)
         self.res_list_display.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.res_list_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # 【关键修正】：必须同时开启视口(Viewport)的拖拽接收
+        self.res_list_display.setAcceptDrops(True)
+        self.res_list_display.viewport().setAcceptDrops(True) 
+        
+        # 重新绑定事件（确保指向类方法）
+        self.res_list_display.dragEnterEvent = self.res_dragEnterEvent
+        self.res_list_display.dragMoveEvent = self.res_dragMoveEvent # 新增：必须处理移动事件
+        self.res_list_display.dropEvent = self.res_dropEvent
+
         self.res_list_display.setTextInteractionFlags(Qt.NoTextInteraction)
         self.res_list_display.viewport().setCursor(Qt.ArrowCursor)
         self.res_list_display.mousePressEvent = self.on_res_list_click
+        
         res_container_layout.addWidget(self.res_list_display)
 
         # --- 右侧悬浮按钮组容器 ---
@@ -762,6 +773,53 @@ class BingoPacker(QMainWindow):
                 self.add_log(f"❌ 裁切出错 {name_base}: {str(e)}", "#f38ba8")
 
         self.add_log(f"✅ 成功产出 {sliced_count} 组序列帧", "#a6e3a1")
+    
+
+    def res_dragEnterEvent(self, event):
+        """当文件拖入区域时触发"""
+        if event.mimeData().hasUrls():
+            # 检查是否有符合条件的文件
+            for url in event.mimeData().urls():
+                path = url.toLocalFile().lower()
+                if path.endswith(('.bgs', '.sprite3')):
+                    event.acceptProposedAction() # 接受动作
+                    return
+        event.ignore()
+
+    def res_dragMoveEvent(self, event):
+        """拖拽过程中持续触发，必须接受才能成功 Drop"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def res_dropEvent(self, event):
+        """当用户松开鼠标时触发"""
+        urls = event.mimeData().urls()
+        new_files = []
+        
+        for u in urls:
+            path = os.path.normpath(u.toLocalFile())
+            # 过滤后缀
+            if path.lower().endswith(('.bgs', '.sprite3')):
+                if path not in self.asset_files:
+                    self.asset_files.append(path)
+                    new_files.append(path)
+        
+        if new_files:
+            # 排序（可选，按名称排序）
+            self.asset_files.sort()
+            self.refresh_asset_list()
+            self.add_log(f"📥 拖拽导入 {len(new_files)} 个预览资源", "#a6e3a1")
+            
+            # 如果之前列表是空的，自动播放刚拖入的第一个
+            if len(self.asset_files) == len(new_files):
+                first_path = self.asset_files[0]
+                self.current_selected_asset = first_path
+                self.refresh_asset_list(highlight_path=first_path)
+                self.load_asset_preview(first_path)
+        
+        event.acceptProposedAction()
 
 
 
