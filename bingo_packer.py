@@ -52,6 +52,7 @@ class BingoPacker(QMainWindow):
         self.play_timer.timeout.connect(self.next_frame)
         self.play_timer.setInterval(80)
         self.is_light_bg = False
+        self.is_full_scale = True
 
         self.setAcceptDrops(True)
         self.init_ui()
@@ -200,7 +201,7 @@ class BingoPacker(QMainWindow):
         self.btn_prev = self.create_mini_btn("prev", self.prev_frame)
         self.btn_play = self.create_mini_btn("play", self.toggle_playback)
         self.btn_next = self.create_mini_btn("next", self.next_frame)
-        self.btn_scale_mode = self.create_mini_btn("btn_scale_mode", None)
+        self.btn_scale_mode = self.create_mini_btn("btn_scale_mode", self.toggle_scale_mode)
 
         self.btn_bg_color = self.create_mini_btn("btn_bg_color", self.toggle_preview_bg)
 
@@ -554,13 +555,24 @@ class BingoPacker(QMainWindow):
         else:
             self.play_timer.stop()
 
-    def first_frame(self): self.current_frame = 0; self.update_display()
-    def last_frame(self): self.current_frame = len(self.preview_images)-1; self.update_display()
+    def first_frame(self): 
+        self.current_frame = 0
+        self.update_display()
+
+    def last_frame(self): 
+        self.current_frame = len(self.preview_images)-1
+        self.update_display()
+
     def next_frame(self): 
-        if self.preview_images: self.current_frame = (self.current_frame + 1) % len(self.preview_images); self.update_display()
+        if self.preview_images: 
+            self.current_frame = (self.current_frame + 1) % len(self.preview_images)
+            self.update_display()
+
     def prev_frame(self): 
-        if self.preview_images: self.current_frame = (self.current_frame - 1) % len(self.preview_images); self.update_display()
-    def update_display(self): pass
+        if self.preview_images: 
+            self.current_frame = (self.current_frame - 1) % len(self.preview_images)
+            self.update_display()
+    
 
 
 
@@ -734,20 +746,24 @@ class BingoPacker(QMainWindow):
             self.add_log(f"❌ 加载失败: {str(e)}", "#f38ba8")
     
     def update_display(self):
-        """更新预览窗口的图像显示 - 优化像素锐利度"""
+        """更新预览窗口的图像显示 - 支持缩放模式切换"""
         if not self.preview_images:
             return
         
         pixmap = self.preview_images[self.current_frame]
         
-        # 核心修改：使用 FastTransformation 保持像素锐利，不进行平滑模糊处理
-        scaled_pixmap = pixmap.scaled(
-            self.preview_screen.size(), 
-            Qt.KeepAspectRatio, 
-            Qt.FastTransformation  # 关键：像素风格必须用这个
-        )
-        
-        self.preview_screen.setPixmap(scaled_pixmap)
+        # 根据 self.is_full_scale 决定显示模式
+        if self.is_full_scale:
+            # 模式 A：缩放填充 (保持比例，像素锐利)
+            scaled_pixmap = pixmap.scaled(
+                self.preview_screen.size(), 
+                Qt.KeepAspectRatio, 
+                Qt.FastTransformation  # 像素风格必须用 Fast
+            )
+            self.preview_screen.setPixmap(scaled_pixmap)
+        else:
+            # 模式 B：原始大小 (不缩放，居中显示)
+            self.preview_screen.setPixmap(pixmap)
 
     
     def on_slice_clicked(self):
@@ -879,7 +895,7 @@ class BingoPacker(QMainWindow):
         if new_files:
             # 【注意】：这里千万不要写 self.asset_files.sort()
             self.refresh_asset_list()
-            self.add_log(f"- 拖拽导入 {len(new_files)} 个预览资源", "#a6e3a1")
+            self.add_log(f"- 导入 {len(new_files)} 个预览资源", "#a6e3a1")
             
             # 无论之前是否有文件，永远播放本次拖入的最末尾一个
             last_path = new_files[-1]
@@ -928,6 +944,12 @@ class BingoPacker(QMainWindow):
                 QSlider::groove:horizontal { background: rgba(49, 50, 68, 180); height: 4px; border-radius: 2px; }
                 QSlider::handle:horizontal { background: #89b4fa; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
             """)
+
+    def toggle_scale_mode(self):
+        """切换预览图的显示模式：缩放填充 / 原始大小"""
+        self.is_full_scale = not self.is_full_scale
+        # 立即刷新当前帧以看到效果
+        self.update_display()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
