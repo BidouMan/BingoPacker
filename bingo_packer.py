@@ -9,34 +9,44 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QFileDialog, QListView, QTreeView, QAbstractItemView, QFrame)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QIcon, QTextCursor, QPixmap,QTextBlockFormat
+from PySide6 import QtSvg
 
-# --- 1. 资源路径与环境锁定逻辑 (优化整合版) ---
+# --- 1. 资源路径与环境锁定逻辑 (终极兼容版) ---
 def get_resource_path(relative_path):
-    """ 获取资源绝对路径，兼容开发环境与打包后的 Win/Mac 环境 """
-    # 适配 PyInstaller 打包后的路径
+    """ 
+    核心逻辑：
+    1. 优先检查 PyInstaller 的临时释放目录 (_MEIPASS)
+    2. 针对 macOS 打包后的 Resources 目录进行二次定位
+    3. 开发环境下使用绝对路径防止 os.chdir 干扰
+    """
+    # 处理 PyInstaller 打包后的路径
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     
-    # 适配 macOS .app 束路径
+    # 获取脚本所在的绝对路径，不依赖当前工作目录
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    
+    # 适配 macOS .app 束路径 (Resources 文件夹)
     if platform.system() == "Darwin" and getattr(sys, 'frozen', False):
-        # 这里的路径通常是 xxx.app/Contents/Resources
-        main_dir = os.path.dirname(sys.executable)
-        mac_res_path = os.path.join(os.path.dirname(main_dir), 'Resources', relative_path)
+        # 路径通常在 ../Resources/relative_path
+        mac_res_path = os.path.join(base_path, '..', 'Resources', relative_path)
         if os.path.exists(mac_res_path):
-            return mac_res_path
+            return os.path.normpath(mac_res_path)
             
-    # 默认返回相对于程序入口文件的路径
-    return os.path.join(os.path.abspath("."), relative_path)
+    return os.path.join(base_path, relative_path)
 
-# 统一锁定工作目录
+# 锁定工作目录：确保文件读写操作在程序所在目录进行
 if getattr(sys, 'frozen', False):
-    # 打包后：Windows 是 .exe 所在目录，Mac 是 MacOS 运行文件所在目录
-    current_dir = os.path.dirname(sys.executable)
+    # 打包后：exe/app 可执行文件所在位置
+    executable_dir = os.path.dirname(sys.executable)
+    # macOS 特殊处理：如果是在 .app 内运行，定位到 .app 所在文件夹而不是 MacOS 内部
+    if platform.system() == "Darwin" and ".app/Contents/MacOS" in executable_dir:
+        executable_dir = os.path.abspath(os.path.join(executable_dir, "../../../"))
+    os.chdir(executable_dir)
 else:
-    # 开发环境：脚本文件所在的目录
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 开发环境
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-os.chdir(current_dir)
 
 class BingoPacker(QMainWindow):
     def __init__(self):

@@ -5,7 +5,7 @@ a = Analysis(
     ['bingo_packer.py'],
     pathex=[],
     binaries=[],
-    datas=[('logo.icns', '.')],
+    datas=[('logo.icns', '.'), ('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
