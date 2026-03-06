@@ -512,7 +512,7 @@ class BingoPacker(QMainWindow):
 
 
     def import_preview_assets(self):
-        """导入预览资源 - 增加默认自动播放首项逻辑"""
+        """导入预览资源 - 保持导入顺序并预览最新项"""
         if not hasattr(self, 'asset_files'):
             self.asset_files = []
 
@@ -521,36 +521,38 @@ class BingoPacker(QMainWindow):
         )
         
         if files:
-            is_first_import = (len(self.asset_files) == 0) # 记录是否是清空后第一次导入
-            
+            # 记录本次新导入的文件
+            added_files = []
             for f in files:
                 f = os.path.normpath(f)
                 if f not in self.asset_files:
-                    self.asset_files.append(f)
+                    self.asset_files.append(f) # append 确保了它在列表末尾
+                    added_files.append(f)
             
-            # 刷新 UI 列表
-            self.refresh_asset_list()
-            self.add_log(f"✅ 成功追加 {len(files)} 个预览资源", "#a6e3a1")
+            if added_files:
+                self.refresh_asset_list()
+                self.add_log(f"✅ 成功追加 {len(added_files)} 个预览资源", "#a6e3a1")
 
-            # --- 新增逻辑：如果导入后列表不为空，默认播放第一项 ---
-            if self.asset_files:
-                first_path = self.asset_files[0]
-                self.current_selected_asset = first_path
-                # 高亮第一项
-                self.refresh_asset_list(highlight_path=first_path)
-                # 加载并自动播放 (你原有的 load_asset_preview 已包含 toggle_playback)
-                self.load_asset_preview(first_path)
+                # --- 核心修改：永远预览本次导入的最末尾一项 ---
+                last_path = added_files[-1] 
+                self.current_selected_asset = last_path
+                self.refresh_asset_list(highlight_path=last_path, auto_scroll=True)
+                self.load_asset_preview(last_path)
 
-    def refresh_asset_list(self, highlight_path=None):
+    def refresh_asset_list(self, highlight_path=None, auto_scroll=False):
         """ 
         刷新资源列表：
-        - 资源之间增加 margin-bottom 实现行间距
-        - 路径过长时自动显示省略号 (...)
+        - 使用 table 布局确保左对齐
+        - 修复点击时滚动条回弹顶部的 Bug
         """
+        # --- 核心修复：记录当前滚动条位置 ---
+        scrollbar = self.res_list_display.verticalScrollBar()
+        current_pos = scrollbar.value()
+        
         self.res_list_display.clear()
         
-        # 获取控件宽度，用于计算截断范围（略小于实际宽度以防溢出）
-        display_width = self.res_list_display.width() - 40 
+        # 减小宽度 buffer 确保不触发横向滚动
+        display_width = self.res_list_display.width() - 25 
 
         html_content = ""
         for path in self.asset_files:
@@ -561,40 +563,31 @@ class BingoPacker(QMainWindow):
             is_selected = (path == highlight_path)
             bg_color = "#313244" if is_selected else "transparent"
             
-            # 条目容器样式
-            item_style = (
-                f"background-color: {bg_color}; "
-                "margin-bottom: 12px; " 
-                "padding: 10px 12px; "
-                "display: block;"
-                
-            )
-            
-            # 路径文字样式：强制不换行 + 溢出隐藏 + 省略号
-            # width 是触发 ellipsis 的关键
-            path_style = (
-                f"width: {display_width}px; "
-                "color: #6c7086; "
-                "font-size: 10px; "
-                "text-overflow: ellipsis; "
-                "white-space: nowrap; "
-                "overflow: hidden; "
-                "display: inline-block;"
-            )
-
+            # 使用 table 强制左对齐并处理边距
             html_content += f"""
-            <div style="{item_style}">
-                <div style="white-space: nowrap; color: #cdd6f4; font-size: 13px; font-weight: bold;">
-                    <span style="color: {icon_color};">●</span> {file_name}
-                </div>
-                <div style="height: 4px;"></div>
-                <div style="{path_style}">
-                    &nbsp;&nbsp;&nbsp;{path}
-                </div>
-            </div>
+            <table width="{display_width}" border="0" cellpadding="8" cellspacing="0" style="margin-bottom: 8px; background-color: {bg_color}; border-radius: 8px;">
+                <tr>
+                    <td align="left">
+                        <div style="color: #cdd6f4; font-size: 13px; font-weight: bold;">
+                            <span style="color: {icon_color};">●</span> {file_name}
+                        </div>
+                        <div style="color: #6c7086; font-size: 10px; margin-top: 2px;">
+                            &nbsp;&nbsp;{path}
+                        </div>
+                    </td>
+                </tr>
+            </table>
             """
         
         self.res_list_display.setHtml(html_content)
+        
+        # --- 核心修复：根据逻辑恢复位置或滚动到底部 ---
+        if auto_scroll:
+            # 如果是新导入，滚动到底部
+            self.res_list_display.moveCursor(QTextCursor.End)
+        else:
+            # 如果是点击切换，恢复之前的滚动位置，防止回弹
+            scrollbar.setValue(current_pos)
 
 
     def on_res_list_click(self, event):
@@ -612,7 +605,7 @@ class BingoPacker(QMainWindow):
 
         if clicked_path:
             self.current_selected_asset = clicked_path
-            self.refresh_asset_list(highlight_path=clicked_path)
+            self.refresh_asset_list(highlight_path=clicked_path, auto_scroll=False)
             # --- 新增：加载预览资源 ---
             self.load_asset_preview(clicked_path)
     
@@ -794,30 +787,27 @@ class BingoPacker(QMainWindow):
             event.ignore()
 
     def res_dropEvent(self, event):
-        """当用户松开鼠标时触发"""
+        """处理拖入的预览文件 - 保持顺序并预览最新"""
         urls = event.mimeData().urls()
         new_files = []
         
         for u in urls:
             path = os.path.normpath(u.toLocalFile())
-            # 过滤后缀
             if path.lower().endswith(('.bgs', '.sprite3')):
                 if path not in self.asset_files:
-                    self.asset_files.append(path)
+                    self.asset_files.append(path) # 始终添加在末尾
                     new_files.append(path)
         
         if new_files:
-            # 排序（可选，按名称排序）
-            self.asset_files.sort()
+            # 【注意】：这里千万不要写 self.asset_files.sort()
             self.refresh_asset_list()
             self.add_log(f"📥 拖拽导入 {len(new_files)} 个预览资源", "#a6e3a1")
             
-            # 如果之前列表是空的，自动播放刚拖入的第一个
-            if len(self.asset_files) == len(new_files):
-                first_path = self.asset_files[0]
-                self.current_selected_asset = first_path
-                self.refresh_asset_list(highlight_path=first_path)
-                self.load_asset_preview(first_path)
+            # 无论之前是否有文件，永远播放本次拖入的最末尾一个
+            last_path = new_files[-1]
+            self.current_selected_asset = last_path
+            self.refresh_asset_list(highlight_path=last_path, auto_scroll=True)
+            self.load_asset_preview(last_path)
         
         event.acceptProposedAction()
 
