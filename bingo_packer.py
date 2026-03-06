@@ -8,25 +8,35 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QTextEdit, QLabel, QSlider,
                                QFileDialog, QListView, QTreeView, QAbstractItemView, QFrame)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
-from PySide6.QtGui import QIcon, QTextCursor, QPixmap
+from PySide6.QtGui import QIcon, QTextCursor, QPixmap,QTextBlockFormat
 
-# --- 1. 资源路径与环境锁定逻辑 (完整保留) ---
+# --- 1. 资源路径与环境锁定逻辑 (优化整合版) ---
 def get_resource_path(relative_path):
+    """ 获取资源绝对路径，兼容开发环境与打包后的 Win/Mac 环境 """
+    # 适配 PyInstaller 打包后的路径
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
-    if platform.system() == "Darwin":
+    
+    # 适配 macOS .app 束路径
+    if platform.system() == "Darwin" and getattr(sys, 'frozen', False):
+        # 这里的路径通常是 xxx.app/Contents/Resources
         main_dir = os.path.dirname(sys.executable)
         mac_res_path = os.path.join(os.path.dirname(main_dir), 'Resources', relative_path)
         if os.path.exists(mac_res_path):
             return mac_res_path
+            
+    # 默认返回相对于程序入口文件的路径
     return os.path.join(os.path.abspath("."), relative_path)
 
+# 统一锁定工作目录
 if getattr(sys, 'frozen', False):
-    bundle_dir = os.path.dirname(sys.executable)
-    os.chdir(bundle_dir)
+    # 打包后：Windows 是 .exe 所在目录，Mac 是 MacOS 运行文件所在目录
+    current_dir = os.path.dirname(sys.executable)
 else:
-    bundle_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(bundle_dir)
+    # 开发环境：脚本文件所在的目录
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+os.chdir(current_dir)
 
 class BingoPacker(QMainWindow):
     def __init__(self):
@@ -83,13 +93,15 @@ class BingoPacker(QMainWindow):
         header.setStyleSheet("color: #89b4fa; font-size: 24px; font-weight: bold; font-family: 'Microsoft YaHei', 'PingFang SC';")
         main_layout.addWidget(header)
 
-        self.console = QTextEdit()
+        self.console = QTextEdit()   
         self.console.setReadOnly(True)
         self.console.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.console.setPlaceholderText("可直接将文件夹拖拽至此处导入...")
-        self.console.setStyleSheet("border: 1px solid #313244; border-radius: 12px; padding: 10px; font-size: 16px;")
+        self.console.setStyleSheet("border: 1px solid #313244; border-radius: 12px; padding: 10px; font-size: 14px;")
         main_layout.addWidget(self.console)
+
+
 
         button_layout = QHBoxLayout()
         btns_config = [
@@ -220,6 +232,9 @@ class BingoPacker(QMainWindow):
         # --- 右侧悬浮按钮组容器 ---
         # 创建一个半透明或透明的容器来存放两个按钮
         self.float_ctrl_container = QWidget(self.res_container)
+        self.float_ctrl_container.setAttribute(Qt.WA_TranslucentBackground) 
+        self.float_ctrl_container.setStyleSheet("background: transparent; border: none;")
+
         self.float_ctrl_layout = QHBoxLayout(self.float_ctrl_container)
         self.float_ctrl_layout.setContentsMargins(0, 0, 0, 0)
         self.float_ctrl_layout.setSpacing(0) # 按钮之间的间距
@@ -335,7 +350,7 @@ class BingoPacker(QMainWindow):
             path = os.path.normpath(u.toLocalFile())
             if os.path.isdir(path) and path not in self.selected_folders:
                 self.selected_folders.append(path)
-                self.add_log(f"📁 文件夹: {os.path.basename(path)}", "#89b4fa")
+                self.add_log(f"📁 📌📔🔺🔸🔹🎯🎟🔖📨📦📤📗📙📘文件夹: {os.path.basename(path)}", "#89b4fa")
                 f_dir += 1
             elif os.path.isfile(path) and path.lower().endswith(".png"):
                 if path not in self.selected_images:
@@ -344,8 +359,8 @@ class BingoPacker(QMainWindow):
                     self.add_log(f"🖼️ 单帧图片: {os.path.basename(path)}", "#fab387")
                     f_img += 1
         
-        if f_dir + f_img > 0:
-            self.add_log(f"✅ 已载入 {f_dir} 组序列 / {f_img} 个单帧", "#a6e3a1")
+        # if f_dir + f_img > 0:
+        #     self.add_log(f"✅ 已载入 {f_dir} 组序列 / {f_img} 个单帧", "#a6e3a1")
 
     def pick_folders(self):
         file_dialog = QFileDialog(self)
@@ -497,9 +512,18 @@ class BingoPacker(QMainWindow):
 
 
 
-    def on_slice_clicked(self): self.add_log("✂️ 智能裁切功能待接入", "#fab387")
+
     def add_log(self, msg, color="#cdd6f4"):
-        self.console.append(f'<span style="color:{color}">{msg}</span>')
+        # 直接在 div 标签里写 CSS 的 line-height
+        # 1.6 代表 1.6 倍行距，你可以根据喜好调成 1.8 或 2.0
+        log_html = f'''
+            <div style="color:{color}; line-height: 125%; margin-bottom: 4px;">
+                {msg}
+            </div>
+        '''
+        self.console.append(log_html)
+        
+        # 保持滚动条到底部
         self.console.moveCursor(QTextCursor.End)
 
 
