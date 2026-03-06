@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24" version="1.1">
-    <title>Public/ic_public_play_last</title>
-    <defs>
-        <path d="M19.2659255,6.65608891 C19.4195201,6.92212253 19.5003811,7.22389975 19.5003811,7.53108891 L19.5003811,16.4689111 C19.5003811,17.4354094 18.7168794,18.2189111 17.7503811,18.2189111 C17.4431919,18.2189111 17.1414147,18.1380501 16.8753811,17.9844555 L9.135,13.5155445 C8.29798791,13.0322953 8.01120639,11.9620121 8.49445554,11.125 C8.64805012,10.8589664 8.86896638,10.6380501 9.135,10.4844555 L16.8753811,6.01554446 C17.7123931,5.5322953 18.7826764,5.81907682 19.2659255,6.65608891 Z M5,6.25 C5.55228475,6.25 6,6.69771525 6,7.25 L6,7.25 L6,16.75 C6,17.3022847 5.55228475,17.75 5,17.75 C4.44771525,17.75 4,17.3022847 4,16.75 L4,16.75 L4,7.25 C4,6.69771525 4.44771525,6.25 5,6.25 Z" id="_path-1"/>
-    </defs>
-    <g id="_Public/ic_public_play_last" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <mask id="_mask-2" fill="white">
-            <use xlink:href="#_path-1"/>
-        </mask>
-        <use id="_形状结合" fill="#000000" xlink:href="#_path-1"/>
+<svg id="_图层_1" data-name="图层_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 24 24">
+  <!-- Generator: Adobe Illustrator 29.0.1, SVG Export Plug-In . SVG Version: 2.1.0 Build 192)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #fff;
+        fill-rule: evenodd;
+      }
+    </style>
+  </defs>
+  <g id="_x5F_Public_x2F_ic_x5F_public_x5F_play_x5F_next">
+    <g id="_形状结合">
+      <path id="_path-1" class="st0" d="M4.7,6.7c.5-.8,1.6-1.1,2.4-.6h0l7.7,4.5c.3.2.5.4.6.6.5.8.2,1.9-.6,2.4h0l-7.7,4.5c-.3.2-.6.2-.9.2-1,0-1.8-.8-1.8-1.8h0V7.5c0-.3,0-.6.2-.9ZM18.2,6.2c.6,0,1,.4,1,1v9.5c0,.6-.4,1-1,1s-1-.4-1-1V7.2c0-.6.4-1,1-1Z"/>
     </g>
+  </g>
 </svg>

@@ -103,20 +103,26 @@ class BingoPacker(QMainWindow):
 
         button_layout = QHBoxLayout()
         btns_config = [
-            ("+ 导入", self.pick_folders, "#313244", "#45475a"),
-            ("× 清空", self.clear_all, "#313244", "#f38ba8"),
-            ("◩ 裁切", self.on_slice_clicked, "#313244", "#fab387"),
-            ("◎ 预览", self.toggle_side_preview, "#313244", "#a6e3a1"),
-            ("spacer", None, None, None), 
-            ("导出 .bgs", lambda: self.run_pack("BGS"), "#45b573", "#58ce87"),
-            ("导出 .sprite3", lambda: self.run_pack("Sprite3"), "#d9793d", "#e68a4d")
+            # (显示文字, 回调函数, 背景色, 悬浮色, 图标文件名)
+            (" 导入", self.pick_folders, "#313244", "#45475a", "pick_folders"),
+            (" 清空", self.clear_all, "#313244", "#f38ba8", "clear_all"),
+            (" 裁切", self.on_slice_clicked, "#313244", "#fab387", "on_slice_clicked"),
+            (" 预览", self.toggle_side_preview, "#313244", "#a6e3a1", "toggle_side_preview"),
+            ("spacer", None, None, None, None), 
+            ("导出 .bgs", lambda: self.run_pack("BGS"), "#45b573", "#58ce87", None),
+            ("导出 .sprite3", lambda: self.run_pack("Sprite3"), "#d9793d", "#e68a4d", None)
         ]
 
-        for text, func, bg, hover in btns_config:
+        for text, func, bg, hover, icon_file in btns_config:
             if text == "spacer":
                 button_layout.addStretch()
                 continue
             btn = QPushButton(text)
+            if icon_file:
+                path = get_resource_path(f"assets/icons/{icon_file}.svg")
+                if os.path.exists(path):
+                    btn.setIcon(QIcon(path))
+            
             btn.setStyleSheet(f"QPushButton {{ background-color: {bg}; padding: 8px 12px; }} QPushButton:hover {{ background-color: {hover}; }}")
             if func: btn.clicked.connect(func)
             button_layout.addWidget(btn)
@@ -190,18 +196,17 @@ class BingoPacker(QMainWindow):
         playback_layout.setContentsMargins(0, 5, 0, 5)
         
         
-        self.btn_prev = self.create_mini_btn("⏮", self.prev_frame)
-        self.btn_play = self.create_mini_btn("▶", self.toggle_playback)
-        self.btn_next = self.create_mini_btn("⏭", self.next_frame)
-        self.btn_scale_mode = self.create_mini_btn("🔍", None)
-        self.btn_bg_color = self.create_mini_btn("🎨", None)
+        self.btn_prev = self.create_mini_btn("prev", self.prev_frame)
+        self.btn_play = self.create_mini_btn("play", self.toggle_playback)
+        self.btn_next = self.create_mini_btn("next", self.next_frame)
+        self.btn_scale_mode = self.create_mini_btn("btn_scale_mode", None)
+        self.btn_bg_color = self.create_mini_btn("btn_bg_color", None)
         
+        playback_layout.addStretch()
         playback_layout.addWidget(self.btn_prev)
         playback_layout.addWidget(self.btn_play)
-        playback_layout.addWidget(self.btn_next)
-        playback_layout.addStretch()
-        playback_layout.addWidget(self.btn_scale_mode)        
-                
+        playback_layout.addWidget(self.btn_next)        
+        playback_layout.addWidget(self.btn_scale_mode)
         playback_layout.addWidget(self.btn_bg_color)
         playback_layout.addStretch()
         drawer_layout.addLayout(playback_layout)
@@ -233,16 +238,40 @@ class BingoPacker(QMainWindow):
         self.float_ctrl_container.setStyleSheet("background: transparent; border: none;")
         self.float_ctrl_layout = QHBoxLayout(self.float_ctrl_container)
         self.float_ctrl_layout.setContentsMargins(0, 0, 0, 0)
-        self.float_ctrl_layout.setSpacing(8)
+        self.float_ctrl_layout.setSpacing(2)
 
-        self.btn_upload = QPushButton("＋", self.float_ctrl_container)
+        self.btn_upload = QPushButton(self.float_ctrl_container)
+        upload_icon = get_resource_path("assets/icons/btn_upload.svg")
+        if os.path.exists(upload_icon): self.btn_upload.setIcon(QIcon(upload_icon))
         self.btn_upload.setFixedSize(24, 24)
-        self.btn_upload.setStyleSheet("QPushButton { background-color: #313244; color: #a6e3a1; border: none; border-radius: 8px; font-size: 18px; } QPushButton:hover { background-color: #45475a; }")
+        self.btn_upload.setStyleSheet("""
+            QPushButton { 
+                background-color: #313244; 
+                border: 1px solid transparent; 
+                border-radius: 8px; 
+            }
+            QPushButton:hover { 
+                background-color: #45475a; 
+                border: none; 
+            }
+        """)
         self.btn_upload.clicked.connect(self.import_preview_assets)
 
-        self.btn_clear_list = QPushButton("×", self.float_ctrl_container)
+        self.btn_clear_list = QPushButton(self.float_ctrl_container)
+        clear_list_icon = get_resource_path("assets/icons/btn_clear_list.svg")
+        if os.path.exists(clear_list_icon): self.btn_clear_list.setIcon(QIcon(clear_list_icon))
         self.btn_clear_list.setFixedSize(24, 24)
-        self.btn_clear_list.setStyleSheet("QPushButton { background-color: #313244; color: #f38ba8; border: none; border-radius: 8px; font-size: 20px; } QPushButton:hover { background-color: #45475a; }")
+        self.btn_clear_list.setStyleSheet("""
+            QPushButton { 
+                background-color: #313244; 
+                border: 1px solid transparent; 
+                border-radius: 8px; 
+            }
+            QPushButton:hover { 
+                background-color: #45475a; 
+                border: none; 
+            }
+        """)
         self.btn_clear_list.clicked.connect(self.clear_asset_list)
 
         self.float_ctrl_layout.addWidget(self.btn_upload)
@@ -292,11 +321,30 @@ class BingoPacker(QMainWindow):
         
         # self.add_log("- 预览列表已彻底重置", "#f38ba8")
 
-    def create_mini_btn(self, text, func):
-        btn = QPushButton(text)
+    def create_mini_btn(self, icon_name, func):
+        btn = QPushButton()
         btn.setFixedSize(40, 24)
-        btn.setStyleSheet("font-size: 12px; background-color: #1e1e2e; border: 1px solid #313244; padding: 0px;")
-        # --- 核心修复：增加判断 ---
+        
+        icon_path = get_resource_path(f"assets/icons/{icon_name}.svg")
+        if os.path.exists(icon_path):
+            btn.setIcon(QIcon(icon_path))
+            btn.setIconSize(btn.size() * 0.7)
+        else:
+            btn.setText("?")
+
+        # --- 更新样式：增加 Hover 高亮效果 ---
+        btn.setStyleSheet("""
+            QPushButton { 
+                background-color: #1e1e2e; 
+                border: none; 
+                padding: 0px; 
+            }
+            QPushButton:hover { 
+                background-color: #313244; 
+                border: none; 
+            }
+        """)
+        
         if func is not None:
             btn.clicked.connect(func)
         return btn
@@ -484,10 +532,24 @@ class BingoPacker(QMainWindow):
 
     # 播放控制逻辑
     def toggle_playback(self):
+        """切换播放/暂停状态"""
+        if not self.preview_images:
+            return
+            
         self.is_playing = not self.is_playing
-        self.btn_play.setText("⏸" if self.is_playing else "▶")
-        if self.is_playing: self.play_timer.start()
-        else: self.play_timer.stop()
+        
+        # 如果当前是播放状态，按钮应该显示“暂停”图标 (让用户点击去暂停)
+        # 如果当前是停止状态，按钮应该显示“播放”图标 (让用户点击去开始)
+        icon_name = "pause" if self.is_playing else "play"
+        icon_path = get_resource_path(f"assets/icons/{icon_name}.svg")
+        
+        if os.path.exists(icon_path):
+            self.btn_play.setIcon(QIcon(icon_path))
+        
+        if self.is_playing:
+            self.play_timer.start()
+        else:
+            self.play_timer.stop()
 
     def first_frame(self): self.current_frame = 0; self.update_display()
     def last_frame(self): self.current_frame = len(self.preview_images)-1; self.update_display()
@@ -624,7 +686,9 @@ class BingoPacker(QMainWindow):
         """解析 .bgs 或 .sprite3 文件并加载图片序列"""
         self.play_timer.stop()
         self.is_playing = False
-        self.btn_play.setText("▶")
+        icon_path = get_resource_path("assets/icons/play.svg")
+        if os.path.exists(icon_path):
+            self.btn_play.setIcon(QIcon(icon_path))
         self.preview_images = []
         self.current_frame = 0
 
