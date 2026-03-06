@@ -778,7 +778,7 @@ class BingoPacker(QMainWindow):
     
     def on_slice_clicked(self):
         """
-        极简工业风（带结果反馈版）：
+        全平台兼容版（支持中文路径）：
         - 智能裁切 ->
         - ■■■■■■■■■■■■■■■■■■■■  [100.0%]
         - 处理完成 
@@ -791,15 +791,17 @@ class BingoPacker(QMainWindow):
         import cv2
         import numpy as np
         from PIL import Image
+        import os
 
+        # 确保等宽字体显示，防止进度条错位
         self.console.setFontFamily("'Consolas', 'Monaco', 'Courier New', monospace")
 
         total_imgs = len(self.selected_images)
         self.add_log("- 智能裁切 ->", "#89b4fa")
         
-        sliced_count = 0
-        new_folders = [] # 记录本次裁切生成的文件夹名称
+        new_folders = [] # 记录本次生成的文件夹名
 
+        # 使用切片 [:] 复制列表，防止在循环中 remove 导致跳过元素
         for i, img_path in enumerate(self.selected_images[:]):
             try:
                 # --- 1. 进度视觉设计 ---
@@ -810,20 +812,34 @@ class BingoPacker(QMainWindow):
                 bar_content = "■" * filled + "∙" * (bar_width - filled)
                 progress_info = f"- {bar_content}  [{percent*100:>5.1f}%]"
                 
-                # --- 2. 裁切路径准备 ---
+                # --- 2. 路径与文件名处理 ---
                 img_name_with_ext = os.path.basename(img_path)
                 name_base = os.path.splitext(img_name_with_ext)[0]
                 output_dir = os.path.join(os.path.dirname(img_path), name_base)
                 
-                src = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-                if src is None: continue
+                # --- 3. 核心：跨平台中文路径读取兼容 ---
+                # 不直接使用 cv2.imread，因为在 Windows 下它不支持非 ASCII 路径
+                try:
+                    # 使用 Python 原生 open 读取二进制流，这在 Win/Mac 下都完美支持中文
+                    with open(img_path, "rb") as f:
+                        file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
+                        # 从内存中解码图像
+                        src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+                except Exception as read_error:
+                    self.add_log(f"- 读取失败: {img_name_with_ext}", "#f38ba8")
+                    continue
+
+                if src is None:
+                    continue
                 
+                # 提取 Alpha 通道或转为灰度
                 alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
                 contours, _ = cv2.findContours(alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
-                if not contours: continue
+                if not contours:
+                    continue
 
-                # (中间的裁切计算逻辑保持不变...)
+                # 寻找最大外接矩形以统一尺寸
                 max_w, max_h = 0, 0
                 valid_rects = []
                 for cnt in contours:
@@ -833,39 +849,57 @@ class BingoPacker(QMainWindow):
                     max_h = max(max_h, h)
                     valid_rects.append((x, y, w, h))
 
+                if not valid_rects:
+                    continue
+
+                # 计算带填充的方形画布尺寸
                 padding = 8 
                 side_length = max(max_w, max_h) + padding
                 if side_length % 2 != 0: side_length += 1
                 target_size = (side_length, side_length)
+
+                # 按位置排序（从上到下，从左到右）
                 valid_rects.sort(key=lambda r: (r[1], r[0]))
 
+                # 创建输出目录
                 os.makedirs(output_dir, exist_ok=True)
+                
+                # 使用 PIL 进行裁切和保存（PIL 原生支持中文路径）
                 pil_img = Image.open(img_path).convert("RGBA")
                 
                 for idx, (x, y, w, h) in enumerate(valid_rects):
                     sprite_crop = pil_img.crop((x, y, x + w, y + h))
                     final_canvas = Image.new("RGBA", target_size, (0, 0, 0, 0))
+                    # 居中对齐
                     offset_x = (side_length - w) // 2
                     offset_y = (side_length - h) // 2
                     final_canvas.paste(sprite_crop, (offset_x, offset_y), sprite_crop)
+                    
                     save_name = f"{name_base}_{idx:02d}.png"
                     final_canvas.save(os.path.join(output_dir, save_name))
 
-                # --- 3. 更新反馈与状态 ---
+                # --- 4. 更新 UI 反馈 ---
                 self.add_log(progress_info, "#74c7ec") 
+                # 强制刷新 GUI，防止界面在处理大量图片时卡死
+                from PySide6.QtWidgets import QApplication
                 QApplication.processEvents()
 
+                # 更新已选文件夹列表（用于导出功能）
                 if output_dir not in self.selected_folders:
                     self.selected_folders.append(output_dir)
-                    new_folders.append(name_base) # 记录生成的文件夹名
+                    new_folders.append(name_base)
                 
-                self.selected_images.remove(img_path)
-                sliced_count += 1
+                # 处理完后从待处理列表中移除
+                if img_path in self.selected_images:
+                    self.selected_images.remove(img_path)
 
             except Exception as e:
+                # 打印详细错误到终端以便调试，控制台只显示简要提示
+                import traceback
+                print(traceback.format_exc())
                 self.add_log(f"- 错误: {os.path.basename(img_path)}", "#f38ba8")
 
-        # --- 4. 最终结果汇总 ---
+        # --- 5. 汇总显示 ---
         self.add_log("- 处理完成", "#a6e3a1")
         for folder_name in new_folders:
             self.add_log(f"- 文件夹 : {folder_name}", "#89b4fa") # 使用蓝色显示生成的文件夹 # 结束语颜色-绿色
