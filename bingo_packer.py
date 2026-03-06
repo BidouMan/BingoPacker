@@ -65,7 +65,7 @@ class BingoPacker(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        # --- 全局 QSS 样式 (保持不动) ---
+        # --- 全局 QSS 样式 ---
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
             QTextEdit { background-color: #181825; border: 1px solid #313244; border-radius: 10px; color: #cdd6f4; }
@@ -101,11 +101,8 @@ class BingoPacker(QMainWindow):
         self.console.setStyleSheet("border: 1px solid #313244; border-radius: 12px; padding: 10px; font-size: 14px;")
         main_layout.addWidget(self.console)
 
-
-
         button_layout = QHBoxLayout()
         btns_config = [
-            # 符号说明：+ (导入), × (清空), ◩ (裁切), ◎ (预览)
             ("+ 导入", self.pick_folders, "#313244", "#45475a"),
             ("× 清空", self.clear_all, "#313244", "#f38ba8"),
             ("◩ 裁切", self.on_slice_clicked, "#313244", "#fab387"),
@@ -121,7 +118,7 @@ class BingoPacker(QMainWindow):
                 continue
             btn = QPushButton(text)
             btn.setStyleSheet(f"QPushButton {{ background-color: {bg}; padding: 8px 12px; }} QPushButton:hover {{ background-color: {hover}; }}")
-            btn.clicked.connect(func)
+            if func: btn.clicked.connect(func)
             button_layout.addWidget(btn)
 
         main_layout.addLayout(button_layout)
@@ -130,7 +127,6 @@ class BingoPacker(QMainWindow):
         # --- 右侧预览管理面板 ---
         self.preview_drawer = QFrame()
         self.preview_drawer.setFixedWidth(0)
-        # 修正: 移除 border-left 以消除亮线，背景保持 #11111b
         self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 2px solid #313244;")
         drawer_layout = QVBoxLayout(self.preview_drawer)
         drawer_layout.setContentsMargins(12, 15, 12, 15)
@@ -141,65 +137,73 @@ class BingoPacker(QMainWindow):
         title.setStyleSheet("color: #89b4fa; font-weight: bold; border: none; font-size: 14px;")
         drawer_layout.addWidget(title)
 
+        # --- 预览区域组合 (屏幕 + 悬浮滑块) ---
+        self.preview_drawer = QFrame()
+        self.preview_drawer.setFixedWidth(0)
+        self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 2px solid #313244;")
+        drawer_layout = QVBoxLayout(self.preview_drawer)
+        drawer_layout.setContentsMargins(12, 15, 12, 15)
+        drawer_layout.setSpacing(10)
+
+        title = QLabel("ANIMATION 预览")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #89b4fa; font-weight: bold; border: none; font-size: 14px;")
+        drawer_layout.addWidget(title)
+
+        # --- 预览屏幕 (作为滑块的父容器) ---
         self.preview_screen = QLabel(
-            "<div style='color: #313244;'>" # 使用深灰色，让它看起来像背景的一部分
+            "<div style='color: #313244;'>"
             "<span style='font-size: 20px;'>▶</span><br>"
-            "<span style='font-size: 20px;'> </span><br>"
             "<span style='font-size: 14px; letter-spacing: 2px;'>等待导入中...</span>"
             "</div>"
         )
-        self.preview_screen.setTextFormat(Qt.RichText) # 必须开启富文本支持
+        self.preview_screen.setTextFormat(Qt.RichText)
         self.preview_screen.setFixedSize(256, 256)
         self.preview_screen.setAlignment(Qt.AlignCenter)
         self.preview_screen.setStyleSheet("background-color: #181825; border-radius: 12px; border: none;")
-        drawer_layout.addWidget(self.preview_screen, 0, Qt.AlignCenter)
         
-        # --- 播放控制条 (3按钮 + Slider) ---
-        # --- 播放控制条 (修正速度与滑块样式) ---
+        # --- 重点：将 speed_slider 设为 preview_screen 的子控件以实现悬浮 ---
+        self.speed_slider = QSlider(Qt.Horizontal, self.preview_screen)
+        self.speed_slider.setMinimum(10)   
+        self.speed_slider.setMaximum(300)  
+        self.speed_slider.setValue(120)    
+        self.speed_slider.setInvertedAppearance(True) 
+        
+        # 设置滑块在预览窗内的绝对位置：底部居中，宽度略小于 256
+        # move(x, y) -> x: 左右留白, y: 底部向上偏移
+        self.speed_slider.setGeometry(64, 230, 128, 20) 
+        
+        self.speed_slider.setStyleSheet("""
+            QSlider { background: transparent; outline: none; }
+            QSlider::groove:horizontal { background: rgba(49, 50, 68, 180); height: 4px; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #89b4fa; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+        """)
+        self.speed_slider.valueChanged.connect(self.update_speed)
+        
+        # 布局中只需添加屏幕，滑块会跟随屏幕移动
+        drawer_layout.addWidget(self.preview_screen, 0, Qt.AlignCenter)
+
+        # --- 播放控制按钮条 (保持 5 按钮) ---
         playback_layout = QHBoxLayout()
-        playback_layout.setSpacing(6)
+        playback_layout.setSpacing(4)
+        playback_layout.setAlignment(Qt.AlignCenter)
+        playback_layout.setContentsMargins(0, 5, 0, 5)
+        
         
         self.btn_prev = self.create_mini_btn("⏮", self.prev_frame)
         self.btn_play = self.create_mini_btn("▶", self.toggle_playback)
         self.btn_next = self.create_mini_btn("⏭", self.next_frame)
+        self.btn_scale_mode = self.create_mini_btn("🔍", None)
+        self.btn_bg_color = self.create_mini_btn("🎨", None)
         
         playback_layout.addWidget(self.btn_prev)
         playback_layout.addWidget(self.btn_play)
         playback_layout.addWidget(self.btn_next)
-        playback_layout.setContentsMargins(0, 5, 0, 5)
-
-        # 速度调节滑块
-        self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setMinimum(10)   
-        self.speed_slider.setMaximum(300)  
-        self.speed_slider.setValue(120)    # 【修正1】默认值设为 120ms，更符合视觉习惯
-        self.speed_slider.setInvertedAppearance(True) 
-        self.speed_slider.setTickPosition(QSlider.NoTicks) 
-        self.speed_slider.setStyleSheet("""
-            QSlider {
-                background: transparent;
-                margin: 0px;
-                padding: 0px;
-                outline: none; /* 【修正2】消除虚线边框 */
-            }
-            QSlider::groove:horizontal { 
-                background: #313244; 
-                height: 4px; 
-                border-radius: 2px; 
-                margin: 0 6px; /* 【修正3】给轨道两头留出空间，消除手柄边缘的竖杠 */
-            }
-            QSlider::handle:horizontal { 
-                background: #89b4fa; 
-                width: 12px; 
-                height: 12px; 
-                margin: -4px 0; 
-                border-radius: 6px; 
-                border: none;
-            }
-        """)
-        self.speed_slider.valueChanged.connect(self.update_speed)
-        playback_layout.addWidget(self.speed_slider)
-
+        playback_layout.addStretch()
+        playback_layout.addWidget(self.btn_scale_mode)        
+                
+        playback_layout.addWidget(self.btn_bg_color)
+        playback_layout.addStretch()
         drawer_layout.addLayout(playback_layout)
 
         # 资源列表区域
@@ -213,66 +217,48 @@ class BingoPacker(QMainWindow):
         self.res_list_display.setReadOnly(True)
         self.res_list_display.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.res_list_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        # 【关键修正】：必须同时开启视口(Viewport)的拖拽接收
         self.res_list_display.setAcceptDrops(True)
         self.res_list_display.viewport().setAcceptDrops(True) 
-        
-        # 重新绑定事件（确保指向类方法）
         self.res_list_display.dragEnterEvent = self.res_dragEnterEvent
-        self.res_list_display.dragMoveEvent = self.res_dragMoveEvent # 新增：必须处理移动事件
+        self.res_list_display.dragMoveEvent = self.res_dragMoveEvent 
         self.res_list_display.dropEvent = self.res_dropEvent
-
         self.res_list_display.setTextInteractionFlags(Qt.NoTextInteraction)
         self.res_list_display.viewport().setCursor(Qt.ArrowCursor)
         self.res_list_display.mousePressEvent = self.on_res_list_click
-        
         res_container_layout.addWidget(self.res_list_display)
 
-        # --- 右侧悬浮按钮组容器 ---
-        # 创建一个半透明或透明的容器来存放两个按钮
+        # 悬浮按钮组
         self.float_ctrl_container = QWidget(self.res_container)
         self.float_ctrl_container.setAttribute(Qt.WA_TranslucentBackground) 
         self.float_ctrl_container.setStyleSheet("background: transparent; border: none;")
-
         self.float_ctrl_layout = QHBoxLayout(self.float_ctrl_container)
         self.float_ctrl_layout.setContentsMargins(0, 0, 0, 0)
-        self.float_ctrl_layout.setSpacing(0) # 按钮之间的间距
+        self.float_ctrl_layout.setSpacing(8)
 
-        # 1. 悬浮上传按钮 (原有的)
         self.btn_upload = QPushButton("＋", self.float_ctrl_container)
         self.btn_upload.setFixedSize(24, 24)
-        self.btn_upload.setToolTip("导入预览资源")
-        self.btn_upload.setCursor(Qt.PointingHandCursor)
-        self.btn_upload.setStyleSheet("""
-            QPushButton { background-color: #313244; color: #a6e3a1; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; } 
-            QPushButton:hover { background-color: #45475a; }
-        """)
+        self.btn_upload.setStyleSheet("QPushButton { background-color: #313244; color: #a6e3a1; border: none; border-radius: 8px; font-size: 18px; } QPushButton:hover { background-color: #45475a; }")
         self.btn_upload.clicked.connect(self.import_preview_assets)
 
-        # 2. 悬浮清空按钮 (新增的)
         self.btn_clear_list = QPushButton("×", self.float_ctrl_container)
         self.btn_clear_list.setFixedSize(24, 24)
-        self.btn_clear_list.setToolTip("清空预览列表")
-        self.btn_clear_list.setCursor(Qt.PointingHandCursor)
-        self.btn_clear_list.setStyleSheet("""
-            QPushButton { background-color: #313244; color: #f38ba8; border: none; border-radius: 8px; font-size: 20px; font-weight: bold; } 
-            QPushButton:hover { background-color: #45475a; }
-        """)
+        self.btn_clear_list.setStyleSheet("QPushButton { background-color: #313244; color: #f38ba8; border: none; border-radius: 8px; font-size: 20px; } QPushButton:hover { background-color: #45475a; }")
         self.btn_clear_list.clicked.connect(self.clear_asset_list)
 
-        # 将按钮加入布局
         self.float_ctrl_layout.addWidget(self.btn_upload)
         self.float_ctrl_layout.addWidget(self.btn_clear_list)
+        self.float_ctrl_container.setFixedSize(60, 32)
 
-        # 设置容器大小并固定位置 (右下角)
-        self.float_ctrl_container.setFixedSize(72, 32) # 32*2 + 8 spacing
-
-        
-
-        
         drawer_layout.addWidget(self.res_container)
         self.global_layout.addWidget(self.preview_drawer)
+
+    def create_mini_btn(self, text, func):
+        btn = QPushButton(text)
+        btn.setFixedSize(40, 24)
+        btn.setStyleSheet("font-size: 12px; background-color: #1e1e2e; border: 1px solid #313244; padding: 0px;")
+        if func is not None:
+            btn.clicked.connect(func)
+        return btn
 
     def update_speed(self):
         """同步滑块数值到定时器"""
@@ -310,7 +296,9 @@ class BingoPacker(QMainWindow):
         btn = QPushButton(text)
         btn.setFixedSize(40, 24)
         btn.setStyleSheet("font-size: 12px; background-color: #1e1e2e; border: 1px solid #313244; padding: 0px;")
-        btn.clicked.connect(func)
+        # --- 核心修复：增加判断 ---
+        if func is not None:
+            btn.clicked.connect(func)
         return btn
 
 
