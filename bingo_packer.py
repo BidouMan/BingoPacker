@@ -51,6 +51,7 @@ class BingoPacker(QMainWindow):
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.next_frame)
         self.play_timer.setInterval(80)
+        self.is_light_bg = False
 
         self.setAcceptDrops(True)
         self.init_ui()
@@ -200,8 +201,10 @@ class BingoPacker(QMainWindow):
         self.btn_play = self.create_mini_btn("play", self.toggle_playback)
         self.btn_next = self.create_mini_btn("next", self.next_frame)
         self.btn_scale_mode = self.create_mini_btn("btn_scale_mode", None)
-        self.btn_bg_color = self.create_mini_btn("btn_bg_color", None)
-        
+
+        self.btn_bg_color = self.create_mini_btn("btn_bg_color", self.toggle_preview_bg)
+
+
         playback_layout.addStretch()
         playback_layout.addWidget(self.btn_prev)
         playback_layout.addWidget(self.btn_play)
@@ -886,7 +889,45 @@ class BingoPacker(QMainWindow):
         
         event.acceptProposedAction()
 
-
+    def toggle_preview_bg(self):
+        """切换预览窗口的背景颜色 (深色/浅色)"""
+        self.is_light_bg = not self.is_light_bg
+        
+        if self.is_light_bg:
+            # 浅色模式：白色背景，深色文字
+            bg_color = "#ffffff"
+            text_color = "#313244"
+        else:
+            # 深色模式：回归你原本的颜色
+            bg_color = "#181825"
+            text_color = "#cdd6f4"
+            
+        # 更新预览窗样式 (保留你原来的 12px 圆角)
+        self.preview_screen.setStyleSheet(f"background-color: {bg_color}; border-radius: 12px; border: none; color: {text_color};")
+        
+        # 如果当前没有图片，更新“等待导入”提示文字的颜色
+        if not self.preview_images:
+            self.preview_screen.setText(
+                f"<div style='color: {text_color};'>"
+                "<span style='font-size: 20px;'>▶</span><br>"
+                "<span style='font-size: 14px; letter-spacing: 2px;'>等待导入中...</span>"
+                "</div>"
+            )
+        
+        if self.is_light_bg:
+            # 浅色模式下，让轨道稍微浅一点
+            self.speed_slider.setStyleSheet("""
+                QSlider { background: transparent; outline: none; }
+                QSlider::groove:horizontal { background: rgba(0, 0, 0, 40); height: 4px; border-radius: 2px; }
+                QSlider::handle:horizontal { background: #89b4fa; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+            """)
+        else:
+            # 恢复深色模式滑块样式
+            self.speed_slider.setStyleSheet("""
+                QSlider { background: transparent; outline: none; }
+                QSlider::groove:horizontal { background: rgba(49, 50, 68, 180); height: 4px; border-radius: 2px; }
+                QSlider::handle:horizontal { background: #89b4fa; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+            """)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
