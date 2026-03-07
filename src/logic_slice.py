@@ -108,8 +108,22 @@ class SliceLogic:
         valid_rects.sort(key=lambda r: (r[1], r[0]))
         os.makedirs(output_dir, exist_ok=True)
         pil_img = Image.open(img_path).convert("RGBA")
+
+        # 设定一个统一的底部留白（Padding），防止脚部紧贴边缘
+        # 建议和之前的整体 padding 保持一致，这里用 4 或 8
+        bottom_margin = 4
+
+
         for idx, (x, y, w, h) in enumerate(valid_rects):
             crop = pil_img.crop((x, y, x + w, y + h))
             canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-            canvas.paste(crop, ((side - w) // 2, (side - h) // 2), crop)
+            # 3. 计算位置
+            # 水平方向：居中
+            offset_x = (side - w) // 2
+            
+            # 垂直方向：底部对齐
+            # 计算方式：总高度 - 精灵高度 - 底部留白
+            # 这样无论精灵多高，它们的“脚底”都在同一条水平线上
+            offset_y = (side - h) - bottom_margin
+            canvas.paste(crop, (offset_x, offset_y), crop)
             canvas.save(os.path.join(output_dir, f"{name_base}_{idx:02d}.png"))
