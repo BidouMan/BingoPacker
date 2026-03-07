@@ -13,17 +13,48 @@ class AssetTree(QTreeWidget):
         self.setHeaderHidden(True)
         self.setIndentation(0)
         self.setAcceptDrops(True)
+        
+        # --- 滚动优化：修复点击最后一行时的跳动 ---
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QTreeWidget.ScrollPerPixel) # 像素级滚动更平滑
+        self.setAutoScroll(False) # 禁用自动滚动校准
+        # ---------------------------------------
 
         self.setStyleSheet("""
             QTreeWidget { 
-                background-color: #181825; border: 2px solid #313244; 
-                border-radius: 12px; outline: none;
+                background-color: #181825; 
+                border: 2px solid #313244; 
+                border-radius: 12px; 
+                outline: none;
+                /* 关键：确保容器不会裁剪掉内部的 margin 效果 */
+                padding: 2px; 
             }
-            QTreeWidget::item { height: 40px; border-bottom: 1px solid #1e1e2e; }
-            QTreeWidget::item:selected { background-color: #2d3f5d; }
             
+            /* 必须针对 viewport 设置透明，否则圆角处会有底色残留 */
+            QTreeWidget QWidget {
+                background: transparent;
+            }
+
+            QTreeWidget::item { 
+                height: 40px; 
+                border-bottom: 1px solid #1e1e2e; 
+                /* 左右留出空隙，防止高亮块直接撞上父容器的边框 */
+                margin-left: 2px;
+                margin-right: 2px;
+            }
+            
+            QTreeWidget::item:selected { 
+                background-color: #2d3f5d; 
+                /* 赋予选中块自己的圆角，使其与父容器弧度匹配 */
+                border-radius: 8px; 
+            }
+            
+            /* 移除最后一行底部的分割线，防止视觉干扰 */
+            QTreeWidget::item:last {
+                border-bottom: none;
+            }
+
             QLabel#NameLabel { 
                 background: transparent; border: none; color: #cdd6f4; font-size: 13px; 
             }
@@ -153,3 +184,10 @@ class AssetTree(QTreeWidget):
     def dragMoveEvent(self, event): event.acceptProposedAction()
     def dropEvent(self, event):
         for url in event.mimeData().urls(): self.add_asset(url.toLocalFile())
+    
+    # def mousePressEvent(self, event):
+    #     # 记录当前的滚动条位置
+    #     pos = self.verticalScrollBar().value()
+    #     super().mousePressEvent(event)
+    #     # 强制恢复位置，防止因为 EnsureVisible 导致的自动跳动
+    #     self.verticalScrollBar().setValue(pos)
