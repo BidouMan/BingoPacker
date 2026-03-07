@@ -99,42 +99,73 @@ class SliceLogic:
         self.add_log(progress_text, "#74c7ec", replace_last=not is_init)
 
     def run_actual_slice(self, img_path, output_dir, name_base):
-        """保持原有的 OpenCV 逻辑"""
+        """
+        针对情况1优化的工业级算法：水平居中 + 统一底部基准对齐
+        解决：呼吸抖动、跳跃/弹飞位移丢失
+        """
+        import cv2
+        import numpy as np
+        from PIL import Image
+        
+        # 1. 读取图片并获取透明度通道
         with open(img_path, "rb") as f:
             file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
             src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+        
         if src is None: return
         alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        
+        # 2. 扫描所有精灵，确定这组动作的最大边界
         contours, _ = cv2.findContours(alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: return
+
         valid_rects = []
         max_w, max_h = 0, 0
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             if w < 2 or h < 2: continue
-            max_w, max_h = max(max_w, w), max(max_h, h)
+            max_w = max(max_w, w)
+            max_h = max(max_h, h)
             valid_rects.append((x, y, w, h))
-        side = max(max_w, max_h) + 8
-        if side % 2 != 0: side += 1
+
+        # 排序：从上到下，从左到右
         valid_rects.sort(key=lambda r: (r[1], r[0]))
+
+        # 3. 建立统一的“画布参考系”
+        # 边长取最大值并留出余量，确保所有动作（包括伸展、跳跃）都能放下
+        padding = 10
+        side = max(max_w, max_h) + padding * 2
+        if side % 2 != 0: side += 1
+
+        # 设置一个固定的地面基准线（距离画布底部的距离）
+        # 只要这个值固定，整组动画的“地面”就是死锚点
+        fixed_bottom_gap = 6 
+
         os.makedirs(output_dir, exist_ok=True)
         pil_img = Image.open(img_path).convert("RGBA")
 
-        # 设定一个统一的底部留白（Padding），防止脚部紧贴边缘
-        # 建议和之前的整体 padding 保持一致，这里用 4 或 8
-        bottom_margin = 4
-
-
+        # 4. 核心渲染循环
         for idx, (x, y, w, h) in enumerate(valid_rects):
+            # 裁剪原始肢体
             crop = pil_img.crop((x, y, x + w, y + h))
+            
+            # 创建透明画布
             canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-            # 3. 计算位置
-            # 水平方向：居中
+            
+            # --- 核心对齐逻辑 ---
+            # 水平：绝对居中，防止左右晃动
             offset_x = (side - w) // 2
             
-            # 垂直方向：底部对齐
-            # 计算方式：总高度 - 精灵高度 - 底部留白
-            # 这样无论精灵多高，它们的“脚底”都在同一条水平线上
-            offset_y = (side - h) - bottom_margin
+            # 垂直：统一底部对齐
+            # 逻辑：画布高度 - 肢体图片高度 - 固定底边距
+            # 如果是跳跃帧，因为 h 包含了脚下空白，offset_y 会变小，角色自然在视觉上“上升”
+            offset_y = side - h - fixed_bottom_gap
+            
+            # 极端情况保护
+            offset_y = max(0, offset_y)
+            
             canvas.paste(crop, (offset_x, offset_y), crop)
-            canvas.save(os.path.join(output_dir, f"{name_base}_{idx:02d}.png"))
+            
+            # 保存
+            save_name = f"{name_base}_{idx:02d}.png"
+            canvas.save(os.path.join(output_dir, save_name))
