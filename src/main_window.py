@@ -7,8 +7,9 @@ from PySide6.QtGui import QIcon
 from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
 from .logic_upload import UploadLogic 
+from .logic_export import ExportLogic
 
-class BingoPacker(QMainWindow, UploadLogic): 
+class BingoPacker(QMainWindow, UploadLogic,ExportLogic): 
     def __init__(self):
         super().__init__()
         # 还原原版核心变量名
@@ -112,10 +113,15 @@ class BingoPacker(QMainWindow, UploadLogic):
         return btn
 
     def connect_signals(self):
-        # 核心绑定
+        # 导入/清空按钮
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
 
+        # 导出按钮(.bgs/,sprite3)
+        self.btn_bgs.clicked.connect(self.on_export_bgs)      # 绑定 BGS
+        self.btn_sprite.clicked.connect(self.on_export_sprite3) # 绑定 Sprite3
+
+        # 预览按钮
         self.btn_preview.clicked.connect(self.toggle_side_preview)
 
 
