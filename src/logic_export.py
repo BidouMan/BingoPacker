@@ -21,7 +21,7 @@ class ExportLogic:
             save_path = f"{folder_path}.sprite3"
 
             try:
-                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp','.svg')
                 files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
                 files.sort()
                 if not files: continue
@@ -93,7 +93,7 @@ class ExportLogic:
             folder_name = os.path.basename(folder_path)
             save_path = f"{folder_path}.bgs"
             try:
-                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp','.svg')
                 files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
                 files.sort()
                 with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zipf:

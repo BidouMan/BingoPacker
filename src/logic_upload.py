@@ -14,7 +14,7 @@ class UploadLogic:
         file_dialog.setWindowTitle("选择素材 (文件夹或 PNG 图片)")
         file_dialog.setFileMode(QFileDialog.Directory)
         file_dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        file_dialog.setNameFilter("All Files (*);;PNG Images (*.png)")
+        file_dialog.setNameFilter("All Supported (*.png *.jpg *.jpeg *.svg *.webp *.bmp);;Vector (*.svg);;Images (*.png *.jpg)")
 
         # --- 核心修复：对话框专属样式表 ---
         file_dialog.setStyleSheet("""
@@ -69,7 +69,7 @@ class UploadLogic:
         else:
             folder_path = os.path.dirname(path)
 
-        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.svg')
         files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
         files.sort()
 
