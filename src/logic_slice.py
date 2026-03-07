@@ -17,8 +17,19 @@ class SliceLogic:
             self.add_log("⚠️ 待处理列表为空", "#f38ba8")
             return
 
-        target_files = [f for f in self.asset_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
+        target_files = []
+        for f in self.asset_files:
+            # 1. 必须是文件且后缀正确
+            if os.path.isfile(f) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                # 2. 关键：判断该文件的父目录是否已经是“已导入的文件夹”
+                # 如果父目录在 selected_folders 中，说明它是文件夹的一部分，不应该被单独裁切
+                parent_dir = os.path.dirname(f)
+                if parent_dir in self.selected_folders:
+                    continue 
+                target_files.append(f)
+        
         if not target_files:
+            self.add_log("⚠️ 列表中没有可裁切的单帧图片", "#f38ba8")
             return
 
         total_imgs = len(target_files)
