@@ -97,28 +97,28 @@ class PreviewPanel(QFrame):
 
         self.asset_tree = AssetTree() 
         # 重点修改：统一底色为 #181825，并添加圆角和边框，确保能看见
-        self.asset_tree.setStyleSheet("""
-            QTreeWidget { 
-                background-color: #181825; 
-                border: none; 
-                border-radius: 12px;
-                color: #cdd6f4;
-                outline: none;
-                font-family: 'Segoe UI', sans-serif;
-            }
-            QTreeWidget::item { 
-                height: 32px; 
-                border-bottom: 1px solid #1e1e2e; 
-                padding-left: 5px;
-            }
-            QTreeWidget::item:hover { 
-                background-color: #313244; 
-            }
-            QTreeWidget::item:selected { 
-                background-color: #45475a; 
-                color: #89b4fa;
-            }
-        """)
+        # self.asset_tree.setStyleSheet("""
+        #     QTreeWidget { 
+        #         background-color: #181825; 
+        #         border: none; 
+        #         border-radius: 12px;
+        #         color: #cdd6f4;
+        #         outline: none;
+        #         font-family: 'Segoe UI', sans-serif;
+        #     }
+        #     QTreeWidget::item { 
+        #         height: 32px; 
+        #         border-bottom: 1px solid #1e1e2e; 
+        #         padding-left: 5px;
+        #     }
+        #     QTreeWidget::item:hover { 
+        #         background-color: #313244; 
+        #     }
+        #     QTreeWidget::item:selected { 
+        #         background-color: #45475a; 
+        #         color: #89b4fa;
+        #     }
+        # """)
         tree_layout.addWidget(self.asset_tree)
 
         # 7. 右下角悬浮按钮
