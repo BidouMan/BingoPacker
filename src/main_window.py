@@ -4,6 +4,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QTextCursor
 from .utils import get_resource_path
+from .widgets.asset_tree import AssetTree
+from .widgets.preview_panel import PreviewPanel
 
 class BingoPacker(QMainWindow):
     def __init__(self):
@@ -15,6 +17,7 @@ class BingoPacker(QMainWindow):
         
         self.setAcceptDrops(True)
         self.init_ui()
+        self.connect_signals()
 
     def init_ui(self):
         # 1. 窗口基础设置
@@ -48,14 +51,20 @@ class BingoPacker(QMainWindow):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
+        # 标题
         header = QLabel("BLOCKBINGO 资产打包工具")
         header.setAlignment(Qt.AlignCenter)
         header.setStyleSheet("color: #89b4fa; font-size: 24px; font-weight: bold;")
         main_layout.addWidget(header)
 
+        # 1. 插入 AssetTree (新组件)
+        # self.tree = AssetTree()
+        # main_layout.addWidget(self.tree)
+
+        # 2. 控制台 (日志输出)
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setPlaceholderText("可直接将文件夹拖拽至此处导入...")
+        self.console.setPlaceholderText("- 可直接将文件夹拖拽至此处导入...")
         main_layout.addWidget(self.console)
 
         # 底部按钮栏
@@ -63,12 +72,12 @@ class BingoPacker(QMainWindow):
         
         self.global_layout.addWidget(self.main_container)
 
-        # --- B. 右侧预览面板 (初始宽度为0，用于动画展开) ---
-        self.preview_drawer = QFrame()
-        self.preview_drawer.setFixedWidth(0)
-        self.preview_drawer.setStyleSheet("background-color: #11111b; border-left: 2px solid #313244;")
-        # 这里暂时留空，下一步填入 Widgets
-        self.global_layout.addWidget(self.preview_drawer)
+        # --- B. 右侧预览面板 (直接实例化新组件) ---
+        # 注意：这里不再创建 QFrame 然后 replace，直接创建 PreviewPanel
+        self.preview_panel = PreviewPanel()
+        self.preview_panel.setFixedWidth(0) # 初始宽度为0，用于点击“预览”按钮时展开
+        self.global_layout.addWidget(self.preview_panel)
+
 
     def setup_bottom_buttons(self, parent_layout):
         button_layout = QHBoxLayout()
@@ -100,12 +109,12 @@ class BingoPacker(QMainWindow):
 
     def toggle_side_preview(self):
         """ 还原抽屉展开动画 """
-        is_expanded = self.preview_drawer.width() > 0
+        is_expanded = self.preview_panel.width() > 0
         target_panel_w = 0 if is_expanded else 280
         target_win_w = 760 if is_expanded else 760 + 280
 
-        self.anim_panel = QPropertyAnimation(self.preview_drawer, b"minimumWidth")
-        self.anim_panel_max = QPropertyAnimation(self.preview_drawer, b"maximumWidth")
+        self.anim_panel = QPropertyAnimation(self.preview_panel, b"minimumWidth")
+        self.anim_panel_max = QPropertyAnimation(self.preview_panel, b"maximumWidth")
         self.anim_win = QPropertyAnimation(self, b"minimumWidth")
         self.anim_win_max = QPropertyAnimation(self, b"maximumWidth")
 
@@ -122,6 +131,21 @@ class BingoPacker(QMainWindow):
         self.console.append(log_html)
         self.console.moveCursor(QTextCursor.End)
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls(): event.accept()
-        else: event.ignore()
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        for url in urls:
+            path = url.toLocalFile()
+            if os.path.isdir(path):
+                # 模拟获取帧数，实际开发时这里要统计图片数量
+                frame_count = len([f for f in os.listdir(path) if f.endswith(('.png', '.jpg'))])
+                self.tree.add_asset(path, frame_count)
+                self.add_log(f"成功导入资产: {os.path.basename(path)} ({frame_count} 帧)", "#a6e3a1")
+    
+    def connect_signals(self):
+        """ 连接各个组件的信号 """
+        # 当 tree 里的片段被点击时，告诉预览面板播哪一段
+        # self.tree.segment_selected.connect(self.preview_panel.load_segment)
+        
+        # 示例：点击“导入”按钮时，手动往 tree 里加个东西看看效果
+        # self.btn_import.clicked.connect(lambda: self.tree.add_asset_folder("测试角色", 20))
+        pass
