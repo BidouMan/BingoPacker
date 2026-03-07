@@ -137,8 +137,6 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
         self.btn_bgs.clicked.connect(self.on_export_bgs)      # 绑定 BGS
         self.btn_sprite.clicked.connect(self.on_export_sprite3) # 绑定 Sprite3
         
-        
-
 
 
     def toggle_side_preview(self):
