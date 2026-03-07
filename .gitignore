@@ -1,0 +1,19 @@
+# --- 必须排除的 ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# --- 打包产物 ---
+build/
+dist/
+*.spec
+
+# --- 操作系统与 IDE ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- 项目临时文件 ---
+*.log
+temp/
