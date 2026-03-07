@@ -8,8 +8,9 @@ from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
 from .logic_upload import UploadLogic 
 from .logic_export import ExportLogic
+from .logic_slice import SliceLogic
 
-class BingoPacker(QMainWindow, UploadLogic,ExportLogic): 
+class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic): 
     def __init__(self):
         super().__init__()
         # 还原原版核心变量名
@@ -62,16 +63,25 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic):
         # 还原原版 Placeholder
         self.console.setPlaceholderText("- 可直接点击导入或拖拽文件夹...")
         self.console.setStyleSheet("""
-            QTextEdit {
-                background-color: #181825; 
-                border: 1px solid #313244; 
-                border-radius: 10px; 
-                color: #cdd6f4;
-                padding: 10px;
-                font-family: 'Consolas', 'Monaco', 'Menlo', 'Microsoft YaHei', 'PingFang SC', monospace;
-                font-size: 14px; 
-            }
-        """)
+                QTextEdit { 
+                    background-color: #181825; 
+                    border: 1px solid #313244; 
+                    border-radius: 10px; 
+                    padding: 10px; 
+                    color: #cdd6f4;
+                    
+                    /* 核心修复 1：字符间距，解决 ■ 挤压 */
+                    letter-spacing: 1px; 
+                    
+                    /* 核心修复 2：行高，确保方块上下不粘连 */
+                    line-height: 120%; 
+                    
+                    /* 核心修复 3：字体顺序。
+                    微软雅黑 (Microsoft YaHei) 渲染的 ■ 字符天生带有轻微圆角感，比 Consolas 好看 */
+                    font-family: 'Microsoft YaHei', 'PingFang SC', 'Consolas', monospace;
+                    font-size: 14px;
+                }
+            """)
         main_layout.addWidget(self.console)
         
         self.setup_bottom_buttons(main_layout)
@@ -117,12 +127,18 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic):
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
 
-        # 导出按钮(.bgs/,sprite3)
-        self.btn_bgs.clicked.connect(self.on_export_bgs)      # 绑定 BGS
-        self.btn_sprite.clicked.connect(self.on_export_sprite3) # 绑定 Sprite3
+        # 裁切按钮
+        self.btn_slice.clicked.connect(self.on_slice_clicked)
 
         # 预览按钮
         self.btn_preview.clicked.connect(self.toggle_side_preview)
+
+        # 导出按钮(.bgs/,sprite3)
+        self.btn_bgs.clicked.connect(self.on_export_bgs)      # 绑定 BGS
+        self.btn_sprite.clicked.connect(self.on_export_sprite3) # 绑定 Sprite3
+        
+        
+
 
 
     def toggle_side_preview(self):

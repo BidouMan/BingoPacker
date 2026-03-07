@@ -60,33 +60,35 @@ class UploadLogic:
                 self.process_import_path(p)
 
     def process_import_path(self, path):
-        """路径解析逻辑，根据原版进行兼容处理"""
         path = os.path.normpath(path)
-        # 如果是文件夹
-        if os.path.isdir(path):
-            folder_path = path
-        # 如果是文件，取其所在目录
-        else:
-            folder_path = os.path.dirname(path)
-
-        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.svg')
-        files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-        files.sort()
-
-        if not files:
-            return
-
-        if folder_path not in self.selected_folders:
-            self.selected_folders.append(folder_path)
         
-        new_files = [os.path.join(folder_path, f) for f in files]
-        self.asset_files.extend(new_files)
-
-        # 还原原版日志
-        # self.add_log("-"*40, "#6272a4")
-        self.add_log(f"-> <b>已导入:</b> <span style='color:#89b4fa;'>{os.path.basename(folder_path)}</span>", "#89b4fa")
-        self.add_log(f"-> 包含帧数: {len(files)} 帧", "#a6e3a1")
-        self.add_log("-"*40, "#6272a4")
+        # --- 核心修复：区分文件和文件夹 ---
+        if os.path.isdir(path):
+            # 如果拖入的是文件夹：读取该目录下所有有效图
+            folder_path = path
+            valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.svg')
+            files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
+            files.sort()
+            
+            if not files: return
+            
+            if folder_path not in self.selected_folders:
+                self.selected_folders.append(folder_path)
+            
+            new_files = [os.path.join(folder_path, f) for f in files]
+            self.asset_files.extend(new_files)
+            
+            # 文件夹导入日志
+            self.add_log(f"-> <b>已导入目录:</b> <span style='color:#89b4fa;'>{os.path.basename(folder_path)}</span>", "#89b4fa")
+            self.add_log(f"-> 包含帧数: {len(files)} 帧", "#a6e3a1")
+        else:
+            # 如果拖入的是单张图片：只处理这一张
+            valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.svg')
+            if path.lower().endswith(valid_exts):
+                if path not in self.asset_files:
+                    self.asset_files.append(path)
+                    # 单图导入日志（完全对齐你要求的格式）
+                    self.add_log(f"- 单帧图片: <span style='color:#89b4fa;'>{os.path.basename(path)}</span>", "#89b4fa")
 
     def add_log(self, msg, color="#cdd6f4"):
         # 核心改动：只设置颜色和行高，不设置字体，让它自动继承 console 的 Consolas 字体
