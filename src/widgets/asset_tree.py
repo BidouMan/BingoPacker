@@ -1,9 +1,8 @@
 import os
-import zipfile
 from PySide6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QPushButton, 
-                               QHBoxLayout, QWidget, QLineEdit, QLabel)
+                               QHBoxLayout, QWidget, QLineEdit, QLabel, QStackedWidget)
 from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QCursor
 
 class AssetTree(QTreeWidget):
     segment_selected = Signal(str, str, int, int)
@@ -17,7 +16,6 @@ class AssetTree(QTreeWidget):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # QSS 样式控制
         self.setStyleSheet("""
             QTreeWidget { 
                 background-color: #181825; border: 2px solid #313244; 
@@ -26,90 +24,74 @@ class AssetTree(QTreeWidget):
             QTreeWidget::item { height: 40px; border-bottom: 1px solid #1e1e2e; }
             QTreeWidget::item:selected { background-color: #2d3f5d; }
             
-            /* 默认态：无边框，无背景，无文字选中高亮 */
-            QLineEdit { 
-                background: transparent; border: none; color: #cdd6f4; 
-                selection-background-color: transparent; /* 关键：禁止平时双击变蓝 */
+            QLabel#NameLabel { 
+                background: transparent; border: none; color: #cdd6f4; font-size: 13px; 
             }
-            QTreeWidget::item:selected QLineEdit { color: #89b4fa; }
-            QTreeWidget::item:selected QLabel { color: #89b4fa; }
+            QTreeWidget::item:selected QLabel#NameLabel { color: #89b4fa; }
 
-            /* 编辑态：开启边框和背景 */
-            QLineEdit[editing="true"] { 
-                background: #1e1e2e; 
-                border: 1px solid #89b4fa; 
-                border-radius: 4px; 
-                color: #cdd6f4 !important;
-                selection-background-color: #45475a; /* 编辑时允许看到选中 */
+            QLineEdit#NameEditor { 
+                background: #1e1e2e; border: 1px solid #89b4fa; 
+                border-radius: 4px; color: #cdd6f4;
+                padding: 0px 4px; selection-background-color: #45475a;
             }
         """)
 
-    def _setup_name_edit(self, edit):
-        """初始化输入框：彻底静默"""
-        edit.setReadOnly(True)
-        edit.setFocusPolicy(Qt.NoFocus)
-        edit.setCursor(Qt.ArrowCursor) # 平时是普通指针
-        edit.setProperty("editing", "false")
+    def _create_name_widget(self, initial_text, width):
+        stack = QStackedWidget()
+        stack.setFixedWidth(width)
+        stack.setFixedHeight(30)
+        # 核心：将 stack 本身存入子控件，方便在过滤器中直接取出
         
-        # 必须确保不穿透鼠标事件，否则无法激活
-        edit.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        label = QLabel(initial_text)
+        label.setObjectName("NameLabel")
+        label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        label.setProperty("parent_stack", stack) # 绑定引用
         
-        edit.installEventFilter(self)
-        # 依然保留这个，处理按下回车的情况
-        edit.editingFinished.connect(lambda: self._stop_edit(edit))
+        editor = QLineEdit(initial_text)
+        editor.setObjectName("NameEditor")
+        editor.setProperty("parent_stack", stack) # 绑定引用
+        
+        stack.addWidget(label)  # Index 0
+        stack.addWidget(editor) # Index 1
+        
+        label.installEventFilter(self)
+        editor.installEventFilter(self)
+        editor.editingFinished.connect(lambda: self._finalize_edit(stack))
+        
+        return stack
 
     def eventFilter(self, obj, event):
-        if isinstance(obj, QLineEdit):
-            # 情况 1: 双击激活改名
+        # 处理 Label 双击
+        if isinstance(obj, QLabel) and obj.objectName() == "NameLabel":
             if event.type() == QEvent.MouseButtonDblClick:
-                if obj.property("editing") == "false":
-                    self._start_edit(obj)
+                stack = obj.property("parent_stack")
+                if stack:
+                    editor = stack.widget(1)
+                    editor.setText(obj.text())
+                    stack.setCurrentIndex(1) # 切换到 QLineEdit
+                    editor.setFocus()
+                    editor.selectAll()
                     return True
-            
-            # 情况 2: 核心修复 - 只要失去焦点，立刻恢复指针和样式
-            # 无论是因为改了名、按了Esc，还是直接点到了别处
-            elif event.type() == QEvent.FocusOut:
-                if obj.property("editing") == "true":
-                    self._stop_edit(obj)
-                    # 注意：这里不 return True，让系统继续处理失去焦点的后续动作
         
+        # 处理 Editor 失去焦点
+        elif isinstance(obj, QLineEdit) and obj.objectName() == "NameEditor":
+            if event.type() == QEvent.FocusOut:
+                stack = obj.property("parent_stack")
+                if stack:
+                    self._finalize_edit(stack)
+                    
         return super().eventFilter(obj, event)
 
-    def _start_edit(self, edit):
-        """激活编辑态"""
-        edit.setReadOnly(False)
-        edit.setFocusPolicy(Qt.StrongFocus)
-        edit.setCursor(Qt.IBeamCursor) # 切换为输入光标
-        edit.setProperty("editing", "true")
-        
-        # 刷新 QSS 以显示边框
-        edit.style().unpolish(edit)
-        edit.style().polish(edit)
-        
-        edit.setFocus()
-        edit.selectAll()
+    def _finalize_edit(self, stack):
+        """同步文字并切回展示态"""
+        label = stack.widget(0)
+        editor = stack.widget(1)
+        if stack.currentIndex() == 1: # 确保当前是编辑态才切回
+            label.setText(editor.text())
+            stack.setCurrentIndex(0)
+            self.setFocus()
 
-    def _stop_edit(self, edit):
-        """退出编辑态：强制恢复指针"""
-        # 防止重复触发（因为 editingFinished 和 FocusOut 可能会撞车）
-        if edit.property("editing") == "false":
-            return
-
-        edit.deselect()
-        edit.setReadOnly(True)
-        edit.setFocusPolicy(Qt.NoFocus)
-        edit.setCursor(Qt.ArrowCursor) # 强制切回普通指针
-        edit.setProperty("editing", "false")
-        
-        # 刷新 QSS 隐藏边框
-        edit.style().unpolish(edit)
-        edit.style().polish(edit)
-        
-        edit.clearFocus()
-        # 核心：手动让父窗口拿回焦点，彻底断掉 QLineEdit 的光标感应
-        self.setFocus()
-
-    # --- 以下保持你的 add_asset 和 add_segment 逻辑即可 ---
+    # --- 保持 add_asset, add_segment 等逻辑不变 ---
     def add_asset(self, path):
         name = os.path.splitext(os.path.basename(path))[0]
         ext = os.path.splitext(path)[1].lower()
@@ -122,18 +104,20 @@ class AssetTree(QTreeWidget):
         layout.setContentsMargins(10, 0, 10, 0)
         
         dot = QLabel("●")
-        dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
+        dot.setStyleSheet(f"color: {dot_color}; font-size: 14px; background: none;")
         
-        name_edit = QLineEdit(name)
-        name_edit.setFixedWidth(140)
-        self._setup_name_edit(name_edit) 
+        name_stack = self._create_name_widget(name, 140)
         
         btn = QPushButton("+")
         btn.setFixedSize(22, 22)
         btn.setStyleSheet("QPushButton{background:#313244;color:#a6adc8;border:none;border-radius:4px;} QPushButton:hover{background:#45475a;}")
         btn.clicked.connect(lambda: self.add_segment(root, "新片段", 0, 10))
         
-        layout.addWidget(dot); layout.addWidget(name_edit); layout.addStretch(); layout.addWidget(btn)
+        layout.addWidget(dot)
+        layout.addWidget(name_stack)
+        layout.addStretch()
+        layout.addWidget(btn)
+        
         self.setItemWidget(root, 0, container)
         self.add_segment(root, "Default Loop", 0, 10)
         root.setExpanded(True)
@@ -144,20 +128,19 @@ class AssetTree(QTreeWidget):
         layout = QHBoxLayout(container)
         layout.setContentsMargins(28, 0, 10, 0)
         
-        n_edit = QLineEdit(name)
-        n_edit.setFixedWidth(100)
-        self._setup_name_edit(n_edit)
+        name_stack = self._create_name_widget(name, 100)
 
         f_style = "background:#11111b; border:1px solid #313244; color:#fab387; border-radius:4px;"
         s_edit = QLineEdit(str(start)); s_edit.setFixedWidth(30); s_edit.setStyleSheet(f_style)
         e_edit = QLineEdit(str(end)); e_edit.setFixedWidth(30); e_edit.setStyleSheet(f_style)
         
-        layout.addWidget(QLabel("🎬")); layout.addWidget(n_edit); layout.addStretch()
+        layout.addWidget(QLabel("🎬"))
+        layout.addWidget(name_stack)
+        layout.addStretch()
         layout.addWidget(s_edit); layout.addWidget(QLabel("-")); layout.addWidget(e_edit)
+        
         self.setItemWidget(child, 0, container)
         return child
-    
-    # ... 其他计算逻辑保持不变 ...
 
     def _calculate_frame_count(self, path):
         try:
