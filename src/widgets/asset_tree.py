@@ -412,6 +412,18 @@ class AssetTree(QTreeWidget):
             if os.path.exists(temp_path): os.remove(temp_path)
             raise e
 
+    def clear_all(self):
+        """彻底清空树节点和逻辑数据"""
+        self.clear()
+        
+        # 如果路径数据存在于 AssetTree 实例中：
+        if hasattr(self, 'asset_files'):
+            self.asset_files = []
+        if hasattr(self, 'selected_folders'):
+            self.selected_folders = []
+            
+        # 如果你是通过主窗口管理数据的，建议在此处也置空（如果逻辑允许）
+        self.verticalScrollBar().setValue(0)
     
 
     

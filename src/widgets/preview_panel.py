@@ -96,29 +96,6 @@ class PreviewPanel(QFrame):
         tree_layout.setContentsMargins(0, 0, 0, 0)
 
         self.asset_tree = AssetTree() 
-        # 重点修改：统一底色为 #181825，并添加圆角和边框，确保能看见
-        # self.asset_tree.setStyleSheet("""
-        #     QTreeWidget { 
-        #         background-color: #181825; 
-        #         border: none; 
-        #         border-radius: 12px;
-        #         color: #cdd6f4;
-        #         outline: none;
-        #         font-family: 'Segoe UI', sans-serif;
-        #     }
-        #     QTreeWidget::item { 
-        #         height: 32px; 
-        #         border-bottom: 1px solid #1e1e2e; 
-        #         padding-left: 5px;
-        #     }
-        #     QTreeWidget::item:hover { 
-        #         background-color: #313244; 
-        #     }
-        #     QTreeWidget::item:selected { 
-        #         background-color: #45475a; 
-        #         color: #89b4fa;
-        #     }
-        # """)
         tree_layout.addWidget(self.asset_tree)
 
         # 7. 右下角悬浮按钮
@@ -129,10 +106,10 @@ class PreviewPanel(QFrame):
         float_layout.setSpacing(4)
 
         self.btn_tree_upload = self.make_float_btn("btn_upload")
-        self.btn_tree_clear = self.make_float_btn("btn_clear_list")
+        self.btn_clear_list = self.make_float_btn("btn_clear_list")
         
         float_layout.addWidget(self.btn_tree_upload)
-        float_layout.addWidget(self.btn_tree_clear)
+        float_layout.addWidget(self.btn_clear_list)
         
         layout.addWidget(self.tree_container, 1)
 
@@ -164,6 +141,23 @@ class PreviewPanel(QFrame):
     
     def button_connect(self):
         self.btn_tree_upload.clicked.connect(self.on_upload_clicked)
+        self.btn_clear_list.clicked.connect(self.on_clear_clicked)
+    
+    def on_clear_clicked(self):
+        """点击垃圾桶按钮的回调"""
+        self.asset_tree.clear_all()
+        self.clear_preview()
+        
+        # 如果需要同步清空主窗口的数据
+        if self.window() and hasattr(self.window(), 'asset_files'):
+            self.window().asset_files = [] # 或者保持空白
+    
+    def clear_preview(self):
+        """清除预览图显示内容"""
+        self.preview_screen.clear()
+        self.preview_screen.setText("NO DATA")
+        # 如果需要给主窗口发日志，可以通过信号或者直接调用 parent 的方法
+        # self.window().add_log("♻️ 资源列表已清空", "#94e2d5")
 
     def on_upload_clicked(self):
         # 修改：使用 getOpenFileName 并设置过滤器，支持文件夹和特定文件
