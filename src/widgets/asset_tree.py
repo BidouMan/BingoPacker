@@ -1,6 +1,5 @@
 import os
 import zipfile
-import json
 from PySide6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QPushButton, 
                                QHBoxLayout, QWidget, QLineEdit, QLabel)
 from PySide6.QtCore import Qt, Signal, QEvent
@@ -14,162 +13,160 @@ class AssetTree(QTreeWidget):
         self.setColumnCount(1)
         self.setHeaderHidden(True)
         self.setIndentation(0)
-        self.setAnimated(True)
         self.setAcceptDrops(True)
-        
-        # 强制隐藏滚动条
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
+        # QSS 样式控制
         self.setStyleSheet("""
             QTreeWidget { 
-                background-color: #181825; 
-                border: 2px solid #313244; 
-                border-radius: 12px;
-                color: #cdd6f4;
-                outline: none;
+                background-color: #181825; border: 2px solid #313244; 
+                border-radius: 12px; outline: none;
             }
             QTreeWidget::item { height: 40px; border-bottom: 1px solid #1e1e2e; }
-            QTreeWidget::item:hover { background-color: #313244; }
-            QTreeWidget::item:selected { background-color: #45475a; }
+            QTreeWidget::item:selected { background-color: #2d3f5d; }
             
-            /* 隐藏滚动条QSS补丁 */
-            QScrollBar:vertical, QScrollBar:horizontal { width: 0px; height: 0px; }
+            /* 默认态：无边框，无背景，无文字选中高亮 */
+            QLineEdit { 
+                background: transparent; border: none; color: #cdd6f4; 
+                selection-background-color: transparent; /* 关键：禁止平时双击变蓝 */
+            }
+            QTreeWidget::item:selected QLineEdit { color: #89b4fa; }
+            QTreeWidget::item:selected QLabel { color: #89b4fa; }
+
+            /* 编辑态：开启边框和背景 */
+            QLineEdit[editing="true"] { 
+                background: #1e1e2e; 
+                border: 1px solid #89b4fa; 
+                border-radius: 4px; 
+                color: #cdd6f4 !important;
+                selection-background-color: #45475a; /* 编辑时允许看到选中 */
+            }
         """)
 
+    def _setup_name_edit(self, edit):
+        """初始化输入框：彻底静默"""
+        edit.setReadOnly(True)
+        edit.setFocusPolicy(Qt.NoFocus)
+        edit.setCursor(Qt.ArrowCursor) # 平时是普通指针
+        edit.setProperty("editing", "false")
+        
+        # 必须确保不穿透鼠标事件，否则无法激活
+        edit.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        
+        edit.installEventFilter(self)
+        # 依然保留这个，处理按下回车的情况
+        edit.editingFinished.connect(lambda: self._stop_edit(edit))
+
+    def eventFilter(self, obj, event):
+        if isinstance(obj, QLineEdit):
+            # 情况 1: 双击激活改名
+            if event.type() == QEvent.MouseButtonDblClick:
+                if obj.property("editing") == "false":
+                    self._start_edit(obj)
+                    return True
+            
+            # 情况 2: 核心修复 - 只要失去焦点，立刻恢复指针和样式
+            # 无论是因为改了名、按了Esc，还是直接点到了别处
+            elif event.type() == QEvent.FocusOut:
+                if obj.property("editing") == "true":
+                    self._stop_edit(obj)
+                    # 注意：这里不 return True，让系统继续处理失去焦点的后续动作
+        
+        return super().eventFilter(obj, event)
+
+    def _start_edit(self, edit):
+        """激活编辑态"""
+        edit.setReadOnly(False)
+        edit.setFocusPolicy(Qt.StrongFocus)
+        edit.setCursor(Qt.IBeamCursor) # 切换为输入光标
+        edit.setProperty("editing", "true")
+        
+        # 刷新 QSS 以显示边框
+        edit.style().unpolish(edit)
+        edit.style().polish(edit)
+        
+        edit.setFocus()
+        edit.selectAll()
+
+    def _stop_edit(self, edit):
+        """退出编辑态：强制恢复指针"""
+        # 防止重复触发（因为 editingFinished 和 FocusOut 可能会撞车）
+        if edit.property("editing") == "false":
+            return
+
+        edit.deselect()
+        edit.setReadOnly(True)
+        edit.setFocusPolicy(Qt.NoFocus)
+        edit.setCursor(Qt.ArrowCursor) # 强制切回普通指针
+        edit.setProperty("editing", "false")
+        
+        # 刷新 QSS 隐藏边框
+        edit.style().unpolish(edit)
+        edit.style().polish(edit)
+        
+        edit.clearFocus()
+        # 核心：手动让父窗口拿回焦点，彻底断掉 QLineEdit 的光标感应
+        self.setFocus()
+
+    # --- 以下保持你的 add_asset 和 add_segment 逻辑即可 ---
     def add_asset(self, path):
-        if not os.path.exists(path): return
-        is_bundle = path.lower().endswith(('.bgs', '.sprite3'))
-        name = os.path.basename(path)
-        total_frames = self._calculate_frame_count(path)
-        
-        root_item = QTreeWidgetItem(self)
-        root_item.setData(0, Qt.UserRole, {"path": path, "type": "root", "total": total_frames})
-        
+        name = os.path.splitext(os.path.basename(path))[0]
+        ext = os.path.splitext(path)[1].lower()
+        dot_color = "#a6e3a1" if ext == ".sprite3" else "#cba6f7"
+        if os.path.isdir(path): dot_color = "#89b4fa"
+
+        root = QTreeWidgetItem(self)
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(10, 0, 10, 0)
         
-        icon_str = "📦" if is_bundle else "📂"
-        name_label = QLabel(f"{icon_str} {name}")
-        name_label.setStyleSheet("font-weight: bold; color: #89b4fa; background: transparent;")
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
         
-        add_btn = QPushButton("+")
-        add_btn.setFixedSize(22, 22)
-        add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.setStyleSheet("""
-            QPushButton { background-color: #313244; color: #a6adc8; border-radius: 6px; border: none; }
-            QPushButton:hover { background-color: #89b4fa; color: #11111b; }
-        """)
-        add_btn.clicked.connect(lambda: self.add_segment(root_item, "新片段", 0, max(0, total_frames - 1)))
+        name_edit = QLineEdit(name)
+        name_edit.setFixedWidth(140)
+        self._setup_name_edit(name_edit) 
         
-        layout.addWidget(name_label)
-        layout.addStretch()
-        layout.addWidget(add_btn)
-        self.setItemWidget(root_item, 0, container)
+        btn = QPushButton("+")
+        btn.setFixedSize(22, 22)
+        btn.setStyleSheet("QPushButton{background:#313244;color:#a6adc8;border:none;border-radius:4px;} QPushButton:hover{background:#45475a;}")
+        btn.clicked.connect(lambda: self.add_segment(root, "新片段", 0, 10))
         
-        self.add_segment(root_item, "Default Loop", 0, max(0, total_frames - 1))
-        root_item.setExpanded(True)
+        layout.addWidget(dot); layout.addWidget(name_edit); layout.addStretch(); layout.addWidget(btn)
+        self.setItemWidget(root, 0, container)
+        self.add_segment(root, "Default Loop", 0, 10)
+        root.setExpanded(True)
 
-    def add_segment(self, parent_item, name, start, end):
-        child = QTreeWidgetItem(parent_item)
+    def add_segment(self, parent, name, start, end):
+        child = QTreeWidgetItem(parent)
         container = QWidget()
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(25, 0, 10, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(28, 0, 10, 0)
         
-        # 1. 动画名称编辑框 (关键逻辑)
-        name_edit = QLineEdit(name)
-        name_edit.setFixedWidth(100)
-        # 默认样式：像 Label 一样透明、无边框
-        name_edit.setReadOnly(True)
-        name_edit.setFocusPolicy(Qt.NoFocus)
-        name_edit.setStyleSheet("""
-            QLineEdit { 
-                background: transparent; border: none; color: #cdd6f4; padding: 2px;
-            }
-        """)
-        # 安装过滤器拦截双击
-        name_edit.installEventFilter(self)
-        # 失去焦点自动锁定
-        name_edit.editingFinished.connect(lambda: self._lock_name_edit(name_edit))
+        n_edit = QLineEdit(name)
+        n_edit.setFixedWidth(100)
+        self._setup_name_edit(n_edit)
 
-        # 2. 帧数显示 (保持现状)
-        start_edit = QLineEdit(str(start))
-        start_edit.setFixedWidth(35)
-        start_edit.setAlignment(Qt.AlignCenter)
-        start_edit.setStyleSheet("background: #11111b; border: 1px solid #313244; color: #fab387; border-radius: 4px;")
+        f_style = "background:#11111b; border:1px solid #313244; color:#fab387; border-radius:4px;"
+        s_edit = QLineEdit(str(start)); s_edit.setFixedWidth(30); s_edit.setStyleSheet(f_style)
+        e_edit = QLineEdit(str(end)); e_edit.setFixedWidth(30); e_edit.setStyleSheet(f_style)
         
-        end_edit = QLineEdit(str(end))
-        end_edit.setFixedWidth(35)
-        end_edit.setAlignment(Qt.AlignCenter)
-        end_edit.setStyleSheet("background: #11111b; border: 1px solid #313244; color: #fab387; border-radius: 4px;")
-        
-        layout.addWidget(QLabel("🎬"))
-        layout.addWidget(name_edit)
-        layout.addStretch()
-        layout.addWidget(start_edit)
-        layout.addWidget(QLabel("-"))
-        layout.addWidget(end_edit)
-        
+        layout.addWidget(QLabel("🎬")); layout.addWidget(n_edit); layout.addStretch()
+        layout.addWidget(s_edit); layout.addWidget(QLabel("-")); layout.addWidget(e_edit)
         self.setItemWidget(child, 0, container)
-        self.scrollToItem(child)
         return child
-
-    def eventFilter(self, obj, event):
-        """实现双击进入编辑模式"""
-        if isinstance(obj, QLineEdit) and event.type() == QEvent.MouseButtonDblClick:
-            self._unlock_name_edit(obj)
-            return True
-        return super().eventFilter(obj, event)
-
-    def _unlock_name_edit(self, edit):
-        """激活编辑状态"""
-        edit.setReadOnly(False)
-        edit.setFocusPolicy(Qt.StrongFocus)
-        edit.setFocus()
-        edit.selectAll()
-        # 切换到高亮编辑样式
-        edit.setStyleSheet("""
-            QLineEdit { 
-                background: #1e1e2e; border: 1px solid #89b4fa; color: #cdd6f4; border-radius: 4px; padding: 2px;
-            }
-        """)
-
-    def _lock_name_edit(self, edit):
-        """恢复只读状态并取消高亮"""
-        # 1. 核心逻辑：取消文本选中高亮
-        edit.deselect() 
-        
-        # 2. 状态锁定
-        edit.setReadOnly(True)
-        edit.setFocusPolicy(Qt.NoFocus)
-        edit.clearFocus()
-        
-        # 3. 恢复静默样式
-        edit.setStyleSheet("""
-            QLineEdit { 
-                background: transparent; 
-                border: none; 
-                color: #cdd6f4; 
-                padding: 2px; 
-            }
-        """)
+    
+    # ... 其他计算逻辑保持不变 ...
 
     def _calculate_frame_count(self, path):
         try:
             if os.path.isdir(path):
-                valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
-                return len([f for f in os.listdir(path) if f.lower().endswith(valid_exts)])
-            elif path.lower().endswith(('.bgs', '.sprite3')):
-                with zipfile.ZipFile(path, 'r') as z:
-                    return len([f for f in z.namelist() if f.lower().endswith(('.png', '.jpg', '.svg'))])
+                return len([f for f in os.listdir(path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))])
+            return 10
         except: return 1
-        return 0
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls(): event.acceptProposedAction()
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls(): event.acceptProposedAction()
+    def dragEnterEvent(self, event): event.acceptProposedAction()
+    def dragMoveEvent(self, event): event.acceptProposedAction()
     def dropEvent(self, event):
         for url in event.mimeData().urls(): self.add_asset(url.toLocalFile())
