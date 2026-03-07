@@ -88,7 +88,7 @@ class UploadLogic:
                 if path not in self.asset_files:
                     self.asset_files.append(path)
                     # 单图导入日志（完全对齐你要求的格式）
-                    self.add_log(f"- 单帧图片: <span style='color:#89b4fa;'>{os.path.basename(path)}</span>", "#89b4fa")
+                    self.add_log(f"-> 单帧图片: <span style='color:#fab387;'>{os.path.basename(path)}</span>", "#fab387")
 
     def add_log(self, msg, color="#cdd6f4"):
         # 核心改动：只设置颜色和行高，不设置字体，让它自动继承 console 的 Consolas 字体

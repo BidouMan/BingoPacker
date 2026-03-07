@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QPushButton, QTextEdit, QLabel)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QTextCursor, QTextBlockFormat, QTextCharFormat
 
 from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
@@ -173,3 +173,31 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
             path = url.toLocalFile()
             # 直接调用 Mixin 里的处理函数
             self.process_import_path(path)
+    
+    def add_log(self, text, color="#cdd6f4", replace_last=False):
+        cursor = self.console.textCursor()
+        
+        if replace_last:
+            # 移到末尾，选中最后一行并删除
+            cursor.movePosition(QTextCursor.End)
+            cursor.select(QTextCursor.LineUnderCursor)
+            cursor.removeSelectedText()
+            # 关键：如果不是第一行，删掉那个残留的换行符，保证新行能接上
+            if not cursor.atStart():
+                cursor.deletePreviousChar()
+
+        cursor.movePosition(QTextCursor.End)
+        fmt_text = f'<span style="color:{color};">{text}</span>'
+        
+        # 如果是第一行或者替换模式，直接插入；否则加换行
+        if not self.console.toPlainText() or replace_last:
+            # 替换模式下，如果前面有内容，补一个换行
+            if replace_last and self.console.toPlainText():
+                cursor.insertHtml(f"<br>{fmt_text}")
+            else:
+                cursor.insertHtml(fmt_text)
+        else:
+            cursor.insertHtml(f"<br>{fmt_text}")
+            
+        self.console.setTextCursor(cursor)
+        self.console.ensureCursorVisible()
