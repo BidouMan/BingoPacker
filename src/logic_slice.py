@@ -99,73 +99,84 @@ class SliceLogic:
         self.add_log(progress_text, "#74c7ec", replace_last=not is_init)
 
     def run_actual_slice(self, img_path, output_dir, name_base):
-        """
-        针对情况1优化的工业级算法：水平居中 + 统一底部基准对齐
-        解决：呼吸抖动、跳跃/弹飞位移丢失
-        """
-        import cv2
+        import cv2, os
         import numpy as np
         from PIL import Image
-        
-        # 1. 读取图片并获取透明度通道
+
+        # 1. 读取
         with open(img_path, "rb") as f:
             file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
             src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
-        
         if src is None: return
         alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-        
-        # 2. 扫描所有精灵，确定这组动作的最大边界
-        contours, _ = cv2.findContours(alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # 2. 闭运算：连接组件
+        gap_threshold = 3 
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_threshold, gap_threshold))
+        closed_alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
+
+        # 3. 寻找轮廓
+        contours, _ = cv2.findContours(closed_alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: return
 
-        valid_rects = []
-        max_w, max_h = 0, 0
+        raw_rects = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             if w < 2 or h < 2: continue
-            max_w = max(max_w, w)
-            max_h = max(max_h, h)
-            valid_rects.append((x, y, w, h))
+            roi_alpha = alpha[y:y+h, x:x+w]
+            coords = cv2.findNonZero(roi_alpha)
+            if coords is not None:
+                ix, iy, iw, ih = cv2.boundingRect(coords)
+                raw_rects.append([x + ix, y + iy, iw, ih])
 
-        # 排序：从上到下，从左到右
-        valid_rects.sort(key=lambda r: (r[1], r[0]))
+        if not raw_rects: return
 
-        # 3. 建立统一的“画布参考系”
-        # 边长取最大值并留出余量，确保所有动作（包括伸展、跳跃）都能放下
+        # --- 4. 【核心改进】动态行识别排序逻辑 ---
+        # 首先，按垂直中心点 center_y 绝对排序
+        raw_rects.sort(key=lambda r: (r[1] + r[3]/2))
+
+        final_sorted_rects = []
+        current_row = []
+        if raw_rects:
+            # 取第一个元素的中心 Y 作为起始行的基准
+            last_center_y = raw_rects[0][1] + raw_rects[0][3]/2
+            # 动态行高阈值：取该序列平均高度的 60%
+            avg_h = sum(r[3] for r in raw_rects) / len(raw_rects)
+            row_threshold = avg_h * 0.6
+
+            for rect in raw_rects:
+                curr_center_y = rect[1] + rect[3]/2
+                # 如果当前块的中心与上一行的中心距离在阈值内，归为同一行
+                if abs(curr_center_y - last_center_y) < row_threshold:
+                    current_row.append(rect)
+                else:
+                    # 距离太远，开启新的一行。开启前，对旧行按 X 轴排序
+                    current_row.sort(key=lambda r: r[0])
+                    final_sorted_rects.extend(current_row)
+                    # 重置行信息
+                    current_row = [rect]
+                    last_center_y = curr_center_y
+            
+            # 处理最后一行
+            current_row.sort(key=lambda r: r[0])
+            final_sorted_rects.extend(current_row)
+
+        # 5. 画布与保存逻辑
+        max_w = max(r[2] for r in final_sorted_rects)
+        max_h = max(r[3] for r in final_sorted_rects)
         padding = 10
         side = max(max_w, max_h) + padding * 2
         if side % 2 != 0: side += 1
-
-        # 设置一个固定的地面基准线（距离画布底部的距离）
-        # 只要这个值固定，整组动画的“地面”就是死锚点
         fixed_bottom_gap = 6 
 
         os.makedirs(output_dir, exist_ok=True)
         pil_img = Image.open(img_path).convert("RGBA")
 
-        # 4. 核心渲染循环
-        for idx, (x, y, w, h) in enumerate(valid_rects):
-            # 裁剪原始肢体
+        for idx, (x, y, w, h) in enumerate(final_sorted_rects):
             crop = pil_img.crop((x, y, x + w, y + h))
-            
-            # 创建透明画布
             canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-            
-            # --- 核心对齐逻辑 ---
-            # 水平：绝对居中，防止左右晃动
             offset_x = (side - w) // 2
-            
-            # 垂直：统一底部对齐
-            # 逻辑：画布高度 - 肢体图片高度 - 固定底边距
-            # 如果是跳跃帧，因为 h 包含了脚下空白，offset_y 会变小，角色自然在视觉上“上升”
             offset_y = side - h - fixed_bottom_gap
-            
-            # 极端情况保护
             offset_y = max(0, offset_y)
-            
             canvas.paste(crop, (offset_x, offset_y), crop)
-            
-            # 保存
-            save_name = f"{name_base}_{idx:02d}.png"
-            canvas.save(os.path.join(output_dir, save_name))
+            canvas.save(os.path.join(output_dir, f"{name_base}_{idx:02d}.png"))
