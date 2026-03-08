@@ -1,6 +1,6 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QPushButton, QTextEdit, QLabel)
+                               QPushButton, QTextEdit, QLabel, QStackedWidget)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QTextCursor, QTextBlockFormat, QTextCharFormat
 
@@ -10,7 +10,7 @@ from .logic_upload import UploadLogic
 from .logic_export import ExportLogic
 from .logic_slice import SliceLogic
 
-class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic): 
+class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic): 
     def __init__(self):
         super().__init__()
         # 还原原版核心变量名
@@ -25,7 +25,7 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
         self.setFixedWidth(760)
         self.setFixedHeight(620)
         
-        # 样式还原
+        # 样式还原 - 严格遵守原始代码
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
             QTextEdit { 
@@ -58,9 +58,12 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
         header.setStyleSheet("color: #89b4fa; font-size: 22px; font-weight: bold;")
         main_layout.addWidget(header)
 
+        # --- 核心切换容器 (QStackedWidget) ---
+        self.left_stack = QStackedWidget()
+        
+        # 页面 0: 原始 Console
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        # 还原原版 Placeholder
         self.console.setPlaceholderText("- 可直接点击导入或拖拽文件夹...")
         self.console.setStyleSheet("""
                 QTextEdit { 
@@ -69,20 +72,25 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
                     border-radius: 10px; 
                     padding: 10px; 
                     color: #cdd6f4;
-                    
-                    /* 核心修复 1：字符间距，解决 ■ 挤压 */
                     letter-spacing: 1px; 
-                    
-                    /* 核心修复 2：行高，确保方块上下不粘连 */
                     line-height: 120%; 
-                    
-                    /* 核心修复 3：字体顺序。
-                    微软雅黑 (Microsoft YaHei) 渲染的 ■ 字符天生带有轻微圆角感，比 Consolas 好看 */
                     font-family: 'Microsoft YaHei', 'PingFang SC', 'Consolas', monospace;
                     font-size: 14px;
                 }
             """)
-        main_layout.addWidget(self.console)
+        self.left_stack.addWidget(self.console)
+
+        # 页面 1: 编辑器占位
+        self.editor_page = QWidget()
+        self.editor_page.setStyleSheet("background-color: #181825; border: 1px solid #313244; border-radius: 10px;")
+        editor_layout = QVBoxLayout(self.editor_page)
+        self.editor_label = QLabel("MANUAL EDITOR MODE\n\n[ 手动裁切编辑区 ]")
+        self.editor_label.setAlignment(Qt.AlignCenter)
+        self.editor_label.setStyleSheet("color: #61afef; font-family: 'Consolas'; border: none;")
+        editor_layout.addWidget(self.editor_label)
+        self.left_stack.addWidget(self.editor_page)
+
+        main_layout.addWidget(self.left_stack)
         
         self.setup_bottom_buttons(main_layout)
         self.global_layout.addWidget(self.main_container)
@@ -96,7 +104,7 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
-        # 定义按钮
+        # 定义按钮 - 严格还原原始颜色和图标名
         self.btn_upload = self.make_btn(" 导入", "#313244", "#45475a", "pick_folders")
         self.btn_clear = self.make_btn(" 清空", "#313244", "#f38ba8", "clear_all")
         self.btn_slice = self.make_btn(" 裁切", "#313244", "#fab387", "on_slice_clicked")
@@ -123,24 +131,25 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
         return btn
 
     def connect_signals(self):
-        # 导入/清空按钮
+        # 1. 基础功能
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
-
-        # 裁切按钮
         self.btn_slice.clicked.connect(self.on_slice_clicked)
-
-        # 预览按钮
         self.btn_preview.clicked.connect(self.toggle_side_preview)
 
-        # 导出按钮(.bgs/,sprite3)
-        self.btn_bgs.clicked.connect(self.on_export_bgs)      # 绑定 BGS
-        self.btn_sprite.clicked.connect(self.on_export_sprite3) # 绑定 Sprite3
-        
+        # 2. 导出功能 - 严格连接到原始代码中对应的函数名
+        # self.btn_bgs.clicked.connect(self.on_export_bgs)  
+        self.btn_bgs.clicked.connect(self.on_export_bgs)    
+        self.btn_sprite.clicked.connect(self.on_export_sprite3)
 
+    # 供外部/PreviewPanel 调用的页面切换接口
+    def toggle_editor_view(self):
+        new_idx = 1 if self.left_stack.currentIndex() == 0 else 0
+        self.left_stack.setCurrentIndex(new_idx)
+        return new_idx == 1
 
     def toggle_side_preview(self):
-        """侧边栏动画"""
+        """侧边栏动画 - 严格复刻原始代码"""
         is_expanded = self.preview_panel.width() > 0
         target_p = 0 if is_expanded else 280
         target_w = 760 if is_expanded else 760 + 280
@@ -163,39 +172,29 @@ class BingoPacker(QMainWindow, UploadLogic,ExportLogic,SliceLogic):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        """
-        严格复刻原版拖拽逻辑：支持一次拖入多个文件夹
-        """
         urls = event.mimeData().urls()
         for url in urls:
             path = url.toLocalFile()
-            # 直接调用 Mixin 里的处理函数
             self.process_import_path(path)
     
     def add_log(self, text, color="#cdd6f4", replace_last=False):
+        # 日志渲染逻辑 - 严格复刻原始代码
         cursor = self.console.textCursor()
-        
         if replace_last:
-            # 移到末尾，选中最后一行并删除
             cursor.movePosition(QTextCursor.End)
             cursor.select(QTextCursor.LineUnderCursor)
             cursor.removeSelectedText()
-            # 关键：如果不是第一行，删掉那个残留的换行符，保证新行能接上
             if not cursor.atStart():
                 cursor.deletePreviousChar()
-
         cursor.movePosition(QTextCursor.End)
         fmt_text = f'<span style="color:{color};">{text}</span>'
-        
-        # 如果是第一行或者替换模式，直接插入；否则加换行
         if not self.console.toPlainText() or replace_last:
-            # 替换模式下，如果前面有内容，补一个换行
             if replace_last and self.console.toPlainText():
                 cursor.insertHtml(f"<br>{fmt_text}")
             else:
                 cursor.insertHtml(fmt_text)
         else:
             cursor.insertHtml(f"<br>{fmt_text}")
-            
         self.console.setTextCursor(cursor)
         self.console.ensureCursorVisible()
+
