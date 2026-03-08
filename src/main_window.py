@@ -166,30 +166,22 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
+    # 在 main_window.py 的 dropEvent 中修改
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         for url in urls:
             path = url.toLocalFile()
-            self.process_import_path(path)
-    
-    def add_log(self, text, color="#cdd6f4", replace_last=False):
-        # 日志渲染逻辑 - 严格复刻原始代码
-        cursor = self.console.textCursor()
-        if replace_last:
-            cursor.movePosition(QTextCursor.End)
-            cursor.select(QTextCursor.LineUnderCursor)
-            cursor.removeSelectedText()
-            if not cursor.atStart():
-                cursor.deletePreviousChar()
-        cursor.movePosition(QTextCursor.End)
-        fmt_text = f'<span style="color:{color};">{text}</span>'
-        if not self.console.toPlainText() or replace_last:
-            if replace_last and self.console.toPlainText():
-                cursor.insertHtml(f"<br>{fmt_text}")
-            else:
-                cursor.insertHtml(fmt_text)
-        else:
-            cursor.insertHtml(f"<br>{fmt_text}")
-        self.console.setTextCursor(cursor)
-        self.console.ensureCursorVisible()
+            
+            # 1. 如果是文件夹 -> 执行原有的打包逻辑
+            if os.path.isdir(path):
+                self.process_import_path(path)
+                
+            # 2. 如果是单张图片 -> 切换到编辑器并显示
+            elif path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
+                # 切换到编辑器页面 (Index 1)
+                self.left_stack.setCurrentIndex(1)
+                # 加载图片
+                if hasattr(self, 'editor_page'):
+                    self.editor_page.display_image(path)
+                self.add_log(f"-> 已载入图片: {os.path.basename(path)}", "#89b4fa")
 
