@@ -85,7 +85,7 @@ class PreviewPanel(QFrame):
         playback_layout.addStretch()
         
         self.btns = {}
-        for icon_name in ["prev", "play", "next", "btn_scale_mode", "btn_bg_color"]:
+        for icon_name in ["prev", "play", "next", "btn_scale_mode", "btn_bg_color","btn_editor"]:
             btn = QPushButton()
             btn.setFixedSize(40, 24)
             btn.setCursor(Qt.PointingHandCursor)
@@ -175,6 +175,26 @@ class PreviewPanel(QFrame):
         self.btns["btn_bg_color"].clicked.connect(self.toggle_bg_color)
         # 点击缩放精灵
         self.btns["btn_scale_mode"].clicked.connect(self.toggle_scale_mode)
+
+        # 点击打开编辑模式
+        self.btns["btn_editor"].clicked.connect(self.on_editor_toggle_clicked)
+
+    def on_editor_toggle_clicked(self):
+        # 获取主窗口实例并调用切换逻辑
+        main_win = self.window()
+        if hasattr(main_win, 'toggle_editor_view'):
+            is_edit_mode = main_win.toggle_editor_view()
+            
+            # 按钮样式反馈
+            if is_edit_mode:
+                # 切换到编辑器模式时，按钮高亮（One Dark 蓝）
+                self.btns["btn_editor"].setStyleSheet("background-color: #61afef; border-radius: 4px;")
+            else:
+                # 恢复默认样式
+                self.btns["btn_editor"].setStyleSheet("""
+                    QPushButton { background-color: #1e1e2e; border: none; border-radius: 4px; }
+                    QPushButton:hover { background-color: #313244; }
+                """)
 
     def toggle_scale_mode(self):
         """切换自适应和原始尺寸模式"""
