@@ -65,9 +65,9 @@ class PreviewPanel(QFrame):
         
         # 4. 速度滑块 (无边框优化)
         self.speed_slider = QSlider(Qt.Horizontal, self.preview_screen)
-        self.speed_slider.setRange(10, 300)
-        self.speed_slider.setValue(120)
-        self.speed_slider.setInvertedAppearance(True) 
+        self.speed_slider.setRange(1, 60)
+        self.speed_slider.setValue(12)
+        # self.speed_slider.setInvertedAppearance(True) 
         self.speed_slider.setGeometry(64, 230, 128, 20)
         self.speed_slider.setStyleSheet("""
             QSlider { background: transparent; border: none; outline: none; }
@@ -165,6 +165,25 @@ class PreviewPanel(QFrame):
         self.btn_tree_upload.clicked.connect(self.on_upload_clicked)
         self.btn_clear_list.clicked.connect(self.on_clear_clicked)
 
+        # 绑定slider控制播放速度
+        self.speed_slider.valueChanged.connect(self.update_play_speed)
+
+    def update_play_speed(self):
+        """将 FPS 数值转换为定时器需要的毫秒间隔"""
+        fps = self.speed_slider.value()
+        
+        # 防止除以 0，虽然 setRange(1, 60) 已经规避了
+        if fps < 1: fps = 1
+        
+        # 计算毫秒间隔 (例如 24 FPS 约为 41ms)
+        interval = int(1000 / fps)
+        
+        # 如果正在播放，实时更新定时器频率
+        if self.play_timer.isActive():
+            self.play_timer.setInterval(interval)
+        
+        # 可选：更新标题或 Label 显示当前 FPS
+        # self.title_label.setText(f"速度: {fps} FPS")
     
     def on_clear_clicked(self):
         """点击垃圾桶按钮的回调"""
@@ -229,6 +248,8 @@ class PreviewPanel(QFrame):
         self.current_range = (start, end)
         self.current_frame_relative_idx = 0
         
+        
+
         # 提取 ZIP 里的图片列表
         try:
             with zipfile.ZipFile(asset_path, 'r') as z:
@@ -239,7 +260,11 @@ class PreviewPanel(QFrame):
             self.frame_names = []
 
         self.title_label.setText(f"PREVIEW: {segment_name}")
-        self.play_timer.start(100) # 默认 10 FPS
+        # 修改这里：使用 slider 的当前值，而不是固定的 100
+        interval = int(1000 / max(1, self.speed_slider.value()))
+        self.play_timer.start(interval)
+
+
         self.update_play_button_icon(is_playing=True)
         self.render_current_frame()
 
@@ -249,7 +274,9 @@ class PreviewPanel(QFrame):
             self.update_play_button_icon(is_playing=False)
         else:
             if self.current_asset_path:
-                self.play_timer.start(100)
+                # 同样使用换算后的间隔
+                interval = int(1000 / max(1, self.speed_slider.value()))
+                self.play_timer.start(interval)
                 self.update_play_button_icon(is_playing=True)
 
     def auto_next_frame(self):
