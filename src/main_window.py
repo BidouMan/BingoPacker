@@ -9,6 +9,7 @@ from .widgets.preview_panel import PreviewPanel
 from .logic_upload import UploadLogic 
 from .logic_export import ExportLogic
 from .logic_slice import SliceLogic
+from .widgets.manual_editor import ManualEditor
 
 class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic): 
     def __init__(self):
@@ -81,13 +82,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic):
         self.left_stack.addWidget(self.console)
 
         # 页面 1: 编辑器占位
-        self.editor_page = QWidget()
-        self.editor_page.setStyleSheet("background-color: #181825; border: 1px solid #313244; border-radius: 10px;")
-        editor_layout = QVBoxLayout(self.editor_page)
-        self.editor_label = QLabel("MANUAL EDITOR MODE\n\n[ 手动裁切编辑区 ]")
-        self.editor_label.setAlignment(Qt.AlignCenter)
-        self.editor_label.setStyleSheet("color: #61afef; font-family: 'Consolas'; border: none;")
-        editor_layout.addWidget(self.editor_label)
+        self.editor_page = ManualEditor() # <--- 替换掉原来简单的 QWidget
         self.left_stack.addWidget(self.editor_page)
 
         main_layout.addWidget(self.left_stack)
