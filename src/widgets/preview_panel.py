@@ -284,28 +284,44 @@ class PreviewPanel(QFrame):
             self.render_current_frame()
 
     def render_current_frame(self):
-        """纯粹的渲染函数：不修改索引"""
         if not self.current_asset_path or not self.frame_names:
             return
 
+        total_files = len(self.frame_names)
         start_val, end_val = self.current_range
-        # 关键修正：JSON 的 1 对应列表的 0
-        base_idx = start_val - 1
+        
+        # --- 核心修复：越界保护 ---
+        # 1. 确保起始点不越界
+        base_idx = max(0, min(start_val - 1, total_files - 1))
+        
+        # 2. 计算片段长度（用户定义的长度）
+        segment_len = max(1, end_val - start_val + 1)
+        
+        # 3. 计算当前要播哪一帧（相对偏移）
+        # 4. 核心：如果绝对索引越界，强制回滚到 0
         real_idx = base_idx + self.current_frame_relative_idx
         
-        if 0 <= real_idx < len(self.frame_names):
-            try:
-                with zipfile.ZipFile(self.current_asset_path, 'r') as z:
-                    img_data = z.read(self.frame_names[real_idx])
-                    img = QImage.fromData(img_data)
-                    if not img.isNull():
-                        pixmap = QPixmap.fromImage(img)
-                        self.preview_screen.setPixmap(pixmap.scaled(
-                            self.preview_screen.size(), 
-                            Qt.KeepAspectRatio, 
-                            Qt.FastTransformation
-                        ))
-            except: pass
+        if real_idx >= total_files:
+            # 如果越界了，说明 1-10 的 8,9,10 没图，直接从头循环
+            self.current_frame_relative_idx = 0
+            real_idx = base_idx
+
+        # --- 执行渲染 ---
+        try:
+            with zipfile.ZipFile(self.current_asset_path, 'r') as z:
+                img_data = z.read(self.frame_names[real_idx])
+                img = QImage.fromData(img_data)
+                if not img.isNull():
+                    pixmap = QPixmap.fromImage(img)
+                    self.preview_screen.setPixmap(pixmap.scaled(
+                        self.preview_screen.size(), 
+                        Qt.KeepAspectRatio, 
+                        Qt.FastTransformation
+                    ))
+        except Exception as e:
+            # 即使单帧读取失败，也不要停止 timer，跳过这一帧即可
+            print(f"帧渲染跳过: {e}")
+            self.current_frame_relative_idx = 0
 
     def update_play_button_icon(self, is_playing):
         icon_name = "pause" if is_playing else "play"

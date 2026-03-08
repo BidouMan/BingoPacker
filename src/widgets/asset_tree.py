@@ -13,6 +13,10 @@ class AssetTree(QTreeWidget):
         self.setIndentation(0)
         self.setAcceptDrops(True)
         
+        # 开启自定义右键菜单策略
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+
         # 滚动设置：必须使用 ScrollPerPixel 才能实现像素级精准对齐
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -230,7 +234,7 @@ class AssetTree(QTreeWidget):
         dot = QLabel("●"); dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
         ns_widget = self._create_name_widget(name, 140)
 
-        # 按钮构建 (S 和 +)
+        # 按钮构建
         btn_s = QPushButton("S"); btn_s.setObjectName("AssetActionBtn")
         btn_s.setFixedSize(22, 22); btn_s.setCursor(Qt.PointingHandCursor)
         btn_s.clicked.connect(lambda: self._sync_asset_to_disk(root, ns_widget))
@@ -243,116 +247,243 @@ class AssetTree(QTreeWidget):
         layout.addWidget(btn_s); layout.addWidget(btn_add)
         self.setItemWidget(root, 0, container)
 
-        # 2. 核心逻辑：解析 ZIP 内部的真实数据
+        # 2. 核心逻辑：解析 ZIP 内部数据并【持久化到 root】
         real_segments = []
+        # 初始化一个默认 data 字典，防止后续 data 变量未定义的错误
+        asset_data = {"count": 0} 
+
         try:
             if zipfile.is_zipfile(path):
                 with zipfile.ZipFile(path, 'r') as zipf:
-                    # .bgs 读取 config.json，.sprite3 读取 sprite.json
                     internal_json = "config.json" if ext == ".bgs" else "sprite.json"
                     
                     if internal_json in zipf.namelist():
                         with zipf.open(internal_json) as f:
-                            data = json.load(f)
-                            real_segments = data.get("segments", [])
+                            asset_data = json.load(f)
                             
-                            if not real_segments:
-                                # 关键：.sprite3 读 costumes 长度，.bgs 读 count 或 frames 长度
-                                if ext == ".sprite3":
-                                    count = len(data.get("costumes", []))
-                                else: # .bgs
-                                    count = data.get("count", len(data.get("frames", [])))
-                                
-                                if count > 0:
-                                    real_segments = [{"name": "Default Loop", "start": 1, "end": count}]
+                            # 计算当前资源的总帧数
+                            if ext == ".sprite3":
+                                count = len(asset_data.get("costumes", []))
+                            else: # .bgs
+                                count = asset_data.get("count", len(asset_data.get("frames", [])))
+                            
+                            # 重要：确保字典里一定有 count 字段供校验使用
+                            asset_data["count"] = count
+                            
+                            real_segments = asset_data.get("segments", [])
+                            if not real_segments and count > 0:
+                                real_segments = [{"name": "Default Loop", "start": 1, "end": count}]
         except Exception as e:
             print(f"解析资源包失败: {e}")
+
+        # 【关键修复点】：将解析出的 data 字典存入 root 节点的 UserRole + 1
+        # 只有存了这一步，_sync_and_validate_row 里的 asset_info.get("count") 才能拿到真实数字
+        root.setData(0, Qt.UserRole + 1, asset_data)
 
         # 3. 动态添加子行
         if real_segments:
             for seg in real_segments:
-                self.add_segment(root, seg.get("name"), int(seg.get("start")), int(seg.get("end")))
+                # 转换数据为 int 确保安全
+                s = int(seg.get("start", 1))
+                e = int(seg.get("end", 1))
+                self.add_segment(root, seg.get("name"), s, e)
         else:
-            # 彻底读取不到才显示默认
-            self.add_segment(root, "Default Loop", 0, 10)
+            # 彻底读取不到时：
+            # 也要给 root 存一个默认 count，否则以后新建片段校验时会按 1 算
+            root.setData(0, Qt.UserRole + 1, {"count": 10})
+            self.add_segment(root, "Default Loop", 1, 10)
             
         root.setExpanded(True)
         self._update_item_states()
 
-        # 导入完成后，默认选中第一个片段
         if root.childCount() > 0:
             first_segment = root.child(0)
             self.setCurrentItem(first_segment) # 这会触发信号并开始播放
 
     def add_segment(self, parent, name, start, end):
         child = QTreeWidgetItem(parent)
-        container = QWidget(); container.setObjectName("ChildContainer")
-        layout = QHBoxLayout(container); layout.setContentsMargins(12, 0, 10, 0)
+        container = QWidget()
+        container.setObjectName("ChildContainer")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(12, 0, 10, 0)
         
-        ns = self._create_name_widget(name, 100)
+        unique_name = self.get_unique_name(parent, name)
+        ns = self._create_name_widget(unique_name, 100)
+        name_edit = ns.widget(1)
         
+        # 优化 QSS：解决残留线条，增加焦点颜色
+        digit_qss = """
+            QLineEdit {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 4px;
+                padding: 0px;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                background-color: #45475a;
+            }
+        """
+
         s_edit = QLineEdit(str(start))
-        s_edit.setObjectName("DigitEdit")
-        s_edit.setFixedSize(30, 22)
+        s_edit.setObjectName("s_edit") # 精准命名
+        s_edit.setFixedSize(35, 22)    # 稍微加宽一点点，避免数字挤压
         s_edit.setAlignment(Qt.AlignCenter)
+        s_edit.setStyleSheet(digit_qss)
         
         e_edit = QLineEdit(str(end))
-        e_edit.setObjectName("DigitEdit")
-        e_edit.setFixedSize(30, 22)
+        e_edit.setObjectName("e_edit") # 精准命名
+        e_edit.setFixedSize(35, 22)
         e_edit.setAlignment(Qt.AlignCenter)
+        e_edit.setStyleSheet(digit_qss)
         
         layout.addWidget(QLabel("🎬"))
         layout.addWidget(ns)
         layout.addStretch()
-        layout.addWidget(s_edit); layout.addWidget(QLabel("-")); layout.addWidget(e_edit)
+        layout.addWidget(s_edit)
+        layout.addWidget(QLabel("-"))
+        layout.addWidget(e_edit)
         
-        # 记录数据到 item，方便获取
-        child.setData(0, Qt.UserRole + 1, (name, start, end))
-
+        child.setData(0, Qt.UserRole + 1, (unique_name, start, end))
         self.setItemWidget(child, 0, container)
         self._update_item_states()
 
-        s_edit.textChanged.connect(self.update_data_and_preview)
-        e_edit.textChanged.connect(self.update_data_and_preview)
+        # 信号绑定
+        name_edit.editingFinished.connect(self.handle_segment_editing_finished)
+        s_edit.editingFinished.connect(self.handle_segment_editing_finished)
+        e_edit.editingFinished.connect(self.handle_segment_editing_finished)
+
         return child
 
+    def _on_digit_edited(self, line_edit, child, root):
+        """当帧数输入框编辑完成时触发"""
+        try:
+            # 1. 获取用户输入
+            val = int(line_edit.text())
+            
+            # 2. 获取当前资源的总帧数
+            # 假设你在 add_asset 时把 data 存到了 root 的 UserRole + 1
+            asset_data = root.data(0, Qt.UserRole + 1)
+            max_frames = asset_data.get("count", val) if isinstance(asset_data, dict) else val
 
-    def _sync_asset_to_disk(self, item, ns_widget):
-        """点击 S 按钮执行：重命名、修改 JSON、重命名序列帧图片"""
-        old_path = item.data(0, Qt.UserRole)
-        new_name = ns_widget.widget(0).text() 
-        
-        dir_name = os.path.dirname(old_path)
-        ext = os.path.splitext(old_path)[1]
-        new_path = os.path.join(dir_name, f"{new_name}{ext}")
-        
-        # 提取当前 UI 上所有的片段数据
-        segments_data = []
-        for i in range(item.childCount()):
-            child = item.child(i)
+            # 3. 核心需求：自动修正
+            if val > max_frames:
+                val = max_frames
+            elif val < 1:
+                val = 1
+            
+            # 4. 回写到 UI
+            line_edit.setText(str(val))
+            
+            # 5. 同步数据到 item 并触发预览刷新
+            self._sync_and_validate_row(child, root, self.itemWidget(child, 0))
+
+        except ValueError:
+            # 如果用户输入了文字，int() 会报错，这里我们直接回滚到之前的合法值即可
+            old_data = child.data(0, Qt.UserRole + 1)
+            if old_data:
+                # 恢复为旧数据，不让程序崩溃
+                line_edit.setText(str(old_data[1] if "start" in line_edit.objectName() else old_data[2]))
+
+    def get_unique_name(self, root, target_name, exclude_item=None):
+        """根据当前已有的片段名，生成一个唯一的名称"""
+        existing_names = []
+        for i in range(root.childCount()):
+            child = root.child(i)
+            if child == exclude_item:
+                continue
             seg_w = self.itemWidget(child, 0)
             if seg_w:
-                # 获取片段名
-                s_name = seg_w.findChild(QStackedWidget).widget(0).text()
-                # 获取帧范围
-                edits = seg_w.findChildren(QLineEdit, "DigitEdit")
-                if len(edits) >= 2:
-                    segments_data.append({
-                        "name": s_name, 
-                        "start": int(edits[0].text()), 
-                        "end": int(edits[1].text())
-                    })
+                # 假设你的 _create_name_widget 返回的是 QStackedWidget，第0页是 QLineEdit
+                name_edit = seg_w.findChild(QStackedWidget).widget(0)
+                existing_names.append(name_edit.text().strip())
+        
+        if target_name not in existing_names:
+            return target_name
+        
+        counter = 1
+        new_name = f"{target_name}_{counter}"
+        while new_name in existing_names:
+            counter += 1
+            new_name = f"{target_name}_{counter}"
+        return new_name
 
+    def handle_segment_editing_finished(self):
+        """当名字或数字编辑完成后触发"""
+        sender = self.sender()
+        # 找到当前操作的 child item
+        for i in range(self.topLevelItemCount()):
+            root = self.topLevelItem(i)
+            for j in range(root.childCount()):
+                child = root.child(j)
+                container = self.itemWidget(child, 0)
+                if container and sender in container.findChildren(QLineEdit):
+                    # 关键：调用带 root 参数的校验函数
+                    self._sync_and_validate_row(child, root, container)
+                    return
+
+    
+
+    def _sync_and_validate_row(self, child, root, container):
+        # 1. 获取 UI 组件
+        stack = container.findChild(QStackedWidget)
+        s_edit = container.findChild(QLineEdit, "s_edit")
+        e_edit = container.findChild(QLineEdit, "e_edit")
+        if not stack or not s_edit or not e_edit: return
+
+        # 2. 获取真实最大索引 (关键：确保 add_asset 时存了 data)
+        asset_info = root.data(0, Qt.UserRole + 1)
+        # 防御性编程：如果真的拿不到数据，暂时设一个极大值，而不是设为 1 导致所有输入被卡死
+        max_limit = 999 
+        if isinstance(asset_info, dict) and "count" in asset_info:
+            max_limit = int(asset_info["count"])
+
+        # 3. 处理名字 (逻辑不变)
+        name_edit = stack.widget(1)
+        unique_name = self.get_unique_name(root, name_edit.text().strip(), exclude_item=child)
+        name_edit.setText(unique_name)
+        stack.widget(0).setText(unique_name)
+
+        # 4. 帧数逻辑：严格区分 Start 和 End
         try:
-            # 1. 如果名字变了，先物理重命名主文件/文件夹
-            if old_path != new_path and os.path.exists(old_path):
-                os.rename(old_path, new_path)
-                item.setData(0, Qt.UserRole, new_path)
+            s_val = int(s_edit.text()) if s_edit.text() else 1
+            e_val = int(e_edit.text()) if e_edit.text() else max_limit
+
+            # --- A. 起始帧 (Start) 处理 ---
+            # 如果起始帧小于 1，修正为 1
+            if s_val < 1: 
+                s_val = 1
+            # 如果起始帧大于资源总数，修正为 1 (乱输归位)
+            if s_val > max_limit:
+                s_val = 1
             
-            # 2. 修改内部数据和图片名
-            self._process_internal_files(new_path, new_name, segments_data)
-        except Exception as e:
-            print(f"同步异常: {e}")
+            # --- B. 结束帧 (End) 处理 ---
+            # 核心需求：如果结束帧大于最大索引，修正为最大索引
+            if e_val > max_limit:
+                e_val = max_limit
+            # 如果结束帧小于 1，修正为最大索引 (或者 1，根据你喜好)
+            if e_val < 1:
+                e_val = max_limit
+
+            # --- C. 逻辑保护：Start 不能超过当前的 End ---
+            if s_val > e_val:
+                s_val = e_val
+
+            # 5. 【重要】将修正后的值强制回写到 UI
+            s_edit.setText(str(s_val))
+            e_edit.setText(str(e_val))
+
+            # 6. 更新内存并同步预览
+            child.setData(0, Qt.UserRole + 1, (unique_name, s_val, e_val))
+            self.segment_selected.emit(root.data(0, Qt.UserRole), unique_name, s_val, e_val)
+
+        except ValueError:
+            # 输入非数字时的兜底
+            s_edit.setText("1")
+            e_edit.setText(str(max_limit))
+            child.setData(0, Qt.UserRole + 1, (unique_name, 1, max_limit))
+            self.segment_selected.emit(root.data(0, Qt.UserRole), unique_name, 1, max_limit)
 
     def _process_internal_files(self, asset_path, asset_name, segments):
         """深度同步：支持SVG、帧数保护，且片段内序号强制从01开始"""
@@ -489,6 +620,47 @@ class AssetTree(QTreeWidget):
                 name, start, end = data
                 # 发射信号给预览面板
                 self.segment_selected.emit(path, name, int(start), int(end))
+    def show_context_menu(self, pos):
+        """显示右键菜单"""
+        item = self.itemAt(pos)
+        if not item or not item.parent():
+            return  # 如果没选中 item 或者选中过的是根节点(资源包)，则不弹出
+
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; }
+            QMenu::item:selected { background-color: #45475a; }
+        """)
+        
+        delete_action = menu.addAction("🗑️ 删除当前片段")
+        # 执行菜单并获取选中的动作
+        action = menu.exec(self.mapToGlobal(pos))
+        
+        if action == delete_action:
+            self.delete_current_segment(item)
+
+    def delete_current_segment(self, item):
+        """执行删除逻辑"""
+        parent = item.parent()
+        if parent:
+            # 1. 从树中移除
+            parent.removeChild(item)
+            
+            # 2. 如果删除后该资源没有片段了，自动补一个默认的(可选)
+            if parent.childCount() == 0:
+                self.add_segment(parent, "Default Loop", 1, 10)
+            
+            # 3. 更新 UI 状态并停止预览面板（因为当前片段没了）
+            self._update_item_states()
+            
+            # 如果你有全局的预览清空信号，可以在这里发射
+            # 或者简单地让预览面板刷新到父节点的第一个孩子
+            if parent.childCount() > 0:
+                self.setCurrentItem(parent.child(0))
+                self.emit_segment_signal(parent.child(0))
+    
+    
 
     def dragEnterEvent(self, event): event.acceptProposedAction()
     def dragMoveEvent(self, event): event.acceptProposedAction()
