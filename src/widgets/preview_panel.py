@@ -168,19 +168,36 @@ class PreviewPanel(QFrame):
     
     def on_clear_clicked(self):
         """点击垃圾桶按钮的回调"""
-        self.asset_tree.clear_all()
         self.clear_preview()
+        self.asset_tree.clear_all()
+        
         
         # 如果需要同步清空主窗口的数据
         if self.window() and hasattr(self.window(), 'asset_files'):
             self.window().asset_files = [] # 或者保持空白
     
     def clear_preview(self):
-        """清除预览图显示内容"""
+        """彻底清除预览状态，防止残留"""
+        # 1. 停止定时器，防止它在后台继续跑渲染逻辑
+        self.play_timer.stop()
+        
+        # 2. 重置所有数据路径和索引
+        self.current_asset_path = None
+        self.frame_names = []
+        self.current_range = (1, 1)
+        self.current_frame_relative_idx = 0
+        
+        # 3. 彻底抹除画面
         self.preview_screen.clear()
-        self.preview_screen.setText("NO DATA")
-        # 如果需要给主窗口发日志，可以通过信号或者直接调用 parent 的方法
-        # self.window().add_log("♻️ 资源列表已清空", "#94e2d5")
+        self.preview_screen.setText("<div style='color: #313244; text-align: center;'>"
+                                   "<span style='font-size: 20px;'>▶</span><br>"
+                                   "等待导入...</div>")
+        
+        # 4. 重置标题
+        self.title_label.setText("ANIMATION 预览")
+        
+        # 5. 重置播放按钮图标为 play 造型
+        self.update_play_button_icon(is_playing=False)
 
     def on_upload_clicked(self):
         # 修改：使用 getOpenFileName 并设置过滤器，支持文件夹和特定文件

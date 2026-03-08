@@ -476,6 +476,9 @@ class AssetTree(QTreeWidget):
 
     def emit_segment_signal(self, item):
         """统一的信号发射逻辑，解决报错的核心"""
+        if item is None or item.parent() is None: 
+            return # 如果 item 为空，直接拦截，不发信号
+        
         if item and item.parent():
             # 获取父节点存储的 ZIP 路径
             path = item.parent().data(0, Qt.UserRole)
