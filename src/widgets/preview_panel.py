@@ -22,6 +22,9 @@ class PreviewPanel(QFrame):
         self.current_range = (1, 1) # (start, end) 来自 JSON
         self.current_frame_relative_idx = 0 # 相对当前片段起始点的偏移
 
+        # 新增：记录是否为白色背景
+        self.is_white_bg = False
+
         self.init_ui()
 
         
@@ -167,6 +170,55 @@ class PreviewPanel(QFrame):
 
         # 绑定slider控制播放速度
         self.speed_slider.valueChanged.connect(self.update_play_speed)
+
+        # 切换预览背景
+        self.btns["btn_bg_color"].clicked.connect(self.toggle_bg_color)
+
+    def toggle_bg_color(self):
+        """在深色和白色背景之间切换，并适配 Slider 样式"""
+        self.is_white_bg = not self.is_white_bg
+        
+        # 1. 定义不同模式下的颜色配置
+        if self.is_white_bg:
+            bg_color = "#ffffff"
+            slider_groove = "rgba(200, 200, 200, 180)" # 浅灰色条
+            slider_handle = "#89b4fa"                 # 深色滑块点，形成对比
+            text_color = "#313244"
+        else:
+            bg_color = "#181825"
+            slider_groove = "rgba(49, 50, 68, 180)"  # 原有的深色条
+            slider_handle = "#89b4fa"                # 原有的蓝色滑块点
+            text_color = "#45475a"
+
+        # 2. 更新预览区域背景
+        self.preview_screen.setStyleSheet(f"""
+            background-color: {bg_color}; 
+            border-radius: 12px; 
+            border: 2px solid #313244;
+        """)
+        
+        # 3. 适配 Slider 背景条颜色
+        self.speed_slider.setStyleSheet(f"""
+            QSlider {{ background: transparent; border: none; outline: none; }}
+            QSlider::groove:horizontal {{ 
+                background: {slider_groove}; 
+                height: 4px; 
+                border-radius: 2px; 
+            }}
+            QSlider::handle:horizontal {{ 
+                background: {slider_handle}; 
+                width: 12px; 
+                height: 12px; 
+                margin: -4px 0; 
+                border-radius: 6px; 
+            }}
+        """)
+        
+        # 4. 如果没有图片，同步更新提示文字颜色
+        if not self.preview_screen.pixmap():
+            self.preview_screen.setText(f"<div style='color: {text_color}; text-align: center;'>"
+                                       "<span style='font-size: 20px;'>▶</span><br>"
+                                       "等待导入...</div>")
 
     def update_play_speed(self):
         """将 FPS 数值转换为定时器需要的毫秒间隔"""
