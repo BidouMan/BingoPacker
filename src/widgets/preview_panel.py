@@ -24,7 +24,7 @@ class PreviewPanel(QFrame):
 
         # 新增：记录是否为白色背景
         self.is_white_bg = False
-
+        self.is_original_size = False
         self.init_ui()
 
         
@@ -173,6 +173,21 @@ class PreviewPanel(QFrame):
 
         # 切换预览背景
         self.btns["btn_bg_color"].clicked.connect(self.toggle_bg_color)
+        # 点击缩放精灵
+        self.btns["btn_scale_mode"].clicked.connect(self.toggle_scale_mode)
+
+    def toggle_scale_mode(self):
+        """切换自适应和原始尺寸模式"""
+        self.is_original_size = not self.is_original_size
+        
+        # # 可选：改变按钮颜色或图标来提示当前模式
+        # if self.is_original_size:
+        #     self.btns["btn_scale_mode"].setStyleSheet("color: #a6e3a1; background: #313244;")
+        # else:
+        #     self.btns["btn_scale_mode"].setStyleSheet("color: #a6adc8; background: #313244;")
+            
+        # 立即重新渲染当前帧
+        self.render_current_frame()
 
     def toggle_bg_color(self):
         """在深色和白色背景之间切换，并适配 Slider 样式"""
@@ -363,44 +378,50 @@ class PreviewPanel(QFrame):
             self.render_current_frame()
 
     def render_current_frame(self):
-        if not self.current_asset_path or not self.frame_names:
+        """核心渲染：针对像素风格优化的渲染逻辑"""
+        total_files = len(self.frame_names)
+        if total_files == 0 or not self.current_asset_path:
             return
 
-        total_files = len(self.frame_names)
         start_val, end_val = self.current_range
-        
-        # --- 核心修复：越界保护 ---
-        # 1. 确保起始点不越界
         base_idx = max(0, min(start_val - 1, total_files - 1))
-        
-        # 2. 计算片段长度（用户定义的长度）
-        segment_len = max(1, end_val - start_val + 1)
-        
-        # 3. 计算当前要播哪一帧（相对偏移）
-        # 4. 核心：如果绝对索引越界，强制回滚到 0
         real_idx = base_idx + self.current_frame_relative_idx
         
         if real_idx >= total_files:
-            # 如果越界了，说明 1-10 的 8,9,10 没图，直接从头循环
             self.current_frame_relative_idx = 0
             real_idx = base_idx
 
-        # --- 执行渲染 ---
         try:
             with zipfile.ZipFile(self.current_asset_path, 'r') as z:
                 img_data = z.read(self.frame_names[real_idx])
                 img = QImage.fromData(img_data)
                 if not img.isNull():
                     pixmap = QPixmap.fromImage(img)
-                    self.preview_screen.setPixmap(pixmap.scaled(
-                        self.preview_screen.size(), 
-                        Qt.KeepAspectRatio, 
-                        Qt.FastTransformation
-                    ))
+                    
+                    if hasattr(self, 'is_original_size') and self.is_original_size:
+                        # 模式 A：原始尺寸 (居中)
+                        self.preview_screen.setPixmap(pixmap)
+                    else:
+                        # 模式 B：黄金比例自适应 (解决“太满”和“偏下”的问题)
+                        container_size = self.preview_screen.size()
+                        
+                        # 设置安全边距，取 85% 为黄金比例
+                        # 这样在 256 尺寸下，最大只会放大到 218 像素左右
+                        margin_factor = 0.85 
+                        target_w = container_size.width() * margin_factor
+                        target_h = container_size.height() * margin_factor
+                        
+                        scaled_pixmap = pixmap.scaled(
+                            target_w, target_h,
+                            Qt.KeepAspectRatio, 
+                            Qt.FastTransformation  # 保持像素风格
+                        )
+                        self.preview_screen.setPixmap(scaled_pixmap)
+                    
+                    # 强制垂直居中对齐，修正视觉偏下的错觉
+                    self.preview_screen.setAlignment(Qt.AlignCenter)
         except Exception as e:
-            # 即使单帧读取失败，也不要停止 timer，跳过这一帧即可
-            print(f"帧渲染跳过: {e}")
-            self.current_frame_relative_idx = 0
+            print(f"渲染失败: {e}")
 
     def update_play_button_icon(self, is_playing):
         icon_name = "pause" if is_playing else "play"
