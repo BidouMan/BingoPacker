@@ -111,6 +111,7 @@ class AssetTree(QTreeWidget):
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.verticalScrollBar().valueChanged.connect(lambda: self._update_item_states())
 
+
     def _get_all_visible_items(self):
         items = []
         def collect(item):
@@ -124,20 +125,15 @@ class AssetTree(QTreeWidget):
             if root.isExpanded(): collect(root)
         return items
 
+    
+
     def _on_selection_changed(self):
         selected = self.selectedItems()
         if not selected: return
         
         target_item = selected[0]
-        # 如果点击的是子片段
-        if target_item.parent():
-            path = target_item.parent().data(0, Qt.UserRole)
-            data = target_item.data(0, Qt.UserRole + 1)
-            if data:
-                name, start, end = data
-                self.segment_selected.emit(path, name, start, end)
-
-
+        # 如果点击的是子片段 """统一的信号发射逻辑"""
+        self.emit_segment_signal(target_item)      
 
         all_visible = self._get_all_visible_items()
         
@@ -241,7 +237,7 @@ class AssetTree(QTreeWidget):
         
         btn_add = QPushButton("+"); btn_add.setObjectName("AssetActionBtn")
         btn_add.setFixedSize(22, 22); btn_add.setCursor(Qt.PointingHandCursor)
-        btn_add.clicked.connect(lambda: self.add_segment(root, "新片段", 0, 10))
+        btn_add.clicked.connect(self.on_add_new_clicked)
         
         layout.addWidget(dot); layout.addWidget(ns_widget); layout.addStretch()
         layout.addWidget(btn_s); layout.addWidget(btn_add)
@@ -315,6 +311,9 @@ class AssetTree(QTreeWidget):
 
         self.setItemWidget(child, 0, container)
         self._update_item_states()
+
+        s_edit.textChanged.connect(self.update_data_and_preview)
+        e_edit.textChanged.connect(self.update_data_and_preview)
         return child
 
 
@@ -443,8 +442,50 @@ class AssetTree(QTreeWidget):
         # 如果你是通过主窗口管理数据的，建议在此处也置空（如果逻辑允许）
         self.verticalScrollBar().setValue(0)
     
-
+    def on_add_new_clicked(self,root):
+        root = self.topLevelItem(0) # 简单处理：获取第一个资源根节点
     
+        new_item = self.add_segment(root, "动画", 1, 10)
+        self.setCurrentItem(new_item) 
+        
+        # 修复：将 self.on_item_clicked 替换为 emit_segment_signal
+        self.emit_segment_signal(new_item)
+    
+    def update_data_and_preview(self):
+        # 获取当前选中的 Item
+        current_item = self.currentItem()
+        if not current_item or not current_item.parent():
+            return
+
+        # 从 UI 部件中获取最新的值
+        widget = self.itemWidget(current_item, 0)
+        edits = widget.findChildren(QLineEdit, "DigitEdit")
+        name_label = widget.findChild(QLabel, "NameLabel") # 假设你也要实时更新名字
+        
+        if len(edits) >= 2:
+            new_data = (
+                name_label.text(),
+                int(edits[0].text() or 0),
+                int(edits[1].text() or 0)
+            )
+            # 更新 Item 存储的数据
+            current_item.setData(0, Qt.UserRole + 1, new_data)
+            
+            # 实时发射信号刷新预览
+            self.emit_segment_signal(current_item)
+
+    def emit_segment_signal(self, item):
+        """统一的信号发射逻辑，解决报错的核心"""
+        if item and item.parent():
+            # 获取父节点存储的 ZIP 路径
+            path = item.parent().data(0, Qt.UserRole)
+            # 获取当前行存储的 (name, start, end) 元组
+            data = item.data(0, Qt.UserRole + 1)
+            
+            if path and data:
+                name, start, end = data
+                # 发射信号给预览面板
+                self.segment_selected.emit(path, name, int(start), int(end))
 
     def dragEnterEvent(self, event): event.acceptProposedAction()
     def dragMoveEvent(self, event): event.acceptProposedAction()
