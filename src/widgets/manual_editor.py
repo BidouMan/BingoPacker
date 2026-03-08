@@ -16,44 +16,52 @@ class ManualEditor(QWidget):
             
             QListWidget { 
                 background-color: #1e1e2e; 
-                border-radius: 10px; 
+                border-radius: 0px; 
                 border: 1px solid #313244; 
                 outline: none;
-                padding: 10px;
+                padding: 2px;
             }
             
             QListWidget::item { 
                 background-color: #313244;
                 color: #cdd6f4;
-                border-radius: 8px;
-                margin: 5px;
-                /* 锁定正方形尺寸 */
-                min-width: 120px; max-width: 120px;
-                min-height: 120px; max-height: 120px;
+                border-radius: 4px;
+                margin: 2px;
+                min-width: 70px; max-width: 70px;
+                min-height: 70px; max-height: 70px;
+                padding: 0px;
             }
             
             QListWidget::item:selected { 
                 background-color: #45475a; 
-                border: 2px solid #89b4fa; 
+                border: 1px solid #89b4fa; 
             }
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
 
         self.frame_list = QListWidget()
-        self.frame_list.setFixedWidth(180) # 稍微加宽一点防止滚动条遮挡卡片
+
+        self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.frame_list.setFixedWidth(82) # 稍微加宽一点防止滚动条遮挡卡片
         
         # 核心布局模式
         self.frame_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.frame_list.setFlow(QListWidget.Flow.TopToBottom) # 确保图标在上文字在下
         self.frame_list.setMovement(QListWidget.Movement.Static)
         
+        # --- 核心改动：禁止换行并开启省略号 ---
+        self.frame_list.setWordWrap(False) # 禁用换行
+        self.frame_list.setTextElideMode(Qt.TextElideMode.ElideRight) # 开启右侧省略号
+        self.frame_list.setUniformItemSizes(True)
         # 关键：GridSize 必须大于 IconSize，留出的空间就是文字区域
-        self.frame_list.setGridSize(QSize(130, 130))
-        self.frame_list.setIconSize(QSize(90, 90)) # 图标区域控制在 90x90
-        self.frame_list.setWordWrap(True) 
+        self.frame_list.setGridSize(QSize(78, 78))
+        self.frame_list.setIconSize(QSize(45, 45)) # 图标区域控制在 90x90
+        self.frame_list.setSpacing(0)
+
 
         layout.addWidget(self.frame_list)
 
@@ -62,13 +70,12 @@ class ManualEditor(QWidget):
         layout.addWidget(self.view)
 
     def display_image(self, file_path):
-        """显示导入的精灵图并更新左侧列表"""
         if not os.path.exists(file_path): return
         
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
 
-        # 1. 更新画布显示 (保持不变)
+        # 画布逻辑
         self.scene.clear()
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
         self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation) 
@@ -77,34 +84,26 @@ class ManualEditor(QWidget):
         self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
         self.view.centerOn(self.pixmap_item)
 
-        # 2. 更新左侧卡片列表
+        # 更新卡片
         self.frame_list.clear() 
         item = QListWidgetItem()
         
-        # --- 居中处理关键步骤 ---
-        canvas_size = 90  # 对应 setIconSize
-        # 创建一个透明的 90x90 正方形画布
-        center_canvas = QPixmap(canvas_size, canvas_size)
-        center_canvas.fill(Qt.GlobalColor.transparent)
-        
-        # 生成等比缩小的原始缩略图
-        thumb = pixmap.scaled(canvas_size, canvas_size, 
+        # 居中缩略图合成 (45x45 区域)
+        icon_area = 45 
+        canvas = QPixmap(icon_area, icon_area)
+        canvas.fill(Qt.GlobalColor.transparent)
+        thumb = pixmap.scaled(icon_area, icon_area, 
                              Qt.AspectRatioMode.KeepAspectRatio, 
                              Qt.TransformationMode.SmoothTransformation)
-        
-        # 将缩略图绘制在透明画布的中心
-        painter = QPainter(center_canvas)
-        x = (canvas_size - thumb.width()) // 2
-        y = (canvas_size - thumb.height()) // 2
-        painter.drawPixmap(x, y, thumb)
+        painter = QPainter(canvas)
+        painter.drawPixmap((icon_area - thumb.width()) // 2, (icon_area - thumb.height()) // 2, thumb)
         painter.end()
         
-        item.setIcon(QIcon(center_canvas))
-        # ----------------------
-
-        file_name = os.path.basename(file_path)
-        item.setText(file_name)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        item.setIcon(QIcon(canvas))
+        item.setText(os.path.basename(file_path))
+        
+        # 保持居中，AlignBottom 会配合 GridSize 自动留出边距
+        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter)
         
         self.frame_list.addItem(item)
 
