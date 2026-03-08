@@ -129,6 +129,16 @@ class AssetTree(QTreeWidget):
         if not selected: return
         
         target_item = selected[0]
+        # 如果点击的是子片段
+        if target_item.parent():
+            path = target_item.parent().data(0, Qt.UserRole)
+            data = target_item.data(0, Qt.UserRole + 1)
+            if data:
+                name, start, end = data
+                self.segment_selected.emit(path, name, start, end)
+
+
+
         all_visible = self._get_all_visible_items()
         
         # 超过6行时的强行吸附逻辑
@@ -273,6 +283,11 @@ class AssetTree(QTreeWidget):
         root.setExpanded(True)
         self._update_item_states()
 
+        # 导入完成后，默认选中第一个片段
+        if root.childCount() > 0:
+            first_segment = root.child(0)
+            self.setCurrentItem(first_segment) # 这会触发信号并开始播放
+
     def add_segment(self, parent, name, start, end):
         child = QTreeWidgetItem(parent)
         container = QWidget(); container.setObjectName("ChildContainer")
@@ -295,6 +310,9 @@ class AssetTree(QTreeWidget):
         layout.addStretch()
         layout.addWidget(s_edit); layout.addWidget(QLabel("-")); layout.addWidget(e_edit)
         
+        # 记录数据到 item，方便获取
+        child.setData(0, Qt.UserRole + 1, (name, start, end))
+
         self.setItemWidget(child, 0, container)
         self._update_item_states()
         return child

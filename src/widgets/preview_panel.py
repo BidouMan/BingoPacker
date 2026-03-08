@@ -1,8 +1,9 @@
 import os
+import zipfile
 from PySide6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel, 
                                QSlider, QPushButton, QWidget,QFileDialog)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt,QTimer
+from PySide6.QtGui import QIcon,QImage, QPixmap
 
 from ..utils import get_resource_path
 from .asset_tree import AssetTree 
@@ -11,7 +12,19 @@ class PreviewPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(280) 
+
+        # --- 播放器状态变量 ---
+        self.play_timer = QTimer(self)
+        self.play_timer.timeout.connect(self.auto_next_frame)
+        
+        self.current_asset_path = None
+        self.frame_names = []      # 当前 ZIP 内所有图片名列表
+        self.current_range = (1, 1) # (start, end) 来自 JSON
+        self.current_frame_relative_idx = 0 # 相对当前片段起始点的偏移
+
         self.init_ui()
+
+        
 
     def init_ui(self):
         # 1. 基础面板背景 (最底层颜色)
@@ -140,8 +153,18 @@ class PreviewPanel(QFrame):
             )
     
     def button_connect(self):
+        # 1. 播放控制
+        self.btns["play"].clicked.connect(self.toggle_play)
+        self.btns["prev"].clicked.connect(self.prev_frame_manual)
+        self.btns["next"].clicked.connect(self.next_frame_manual)
+        
+        # 2. 点击资源列表切换预览
+        self.asset_tree.segment_selected.connect(self.start_preview_animation)
+        
+        # 3. 原有功能
         self.btn_tree_upload.clicked.connect(self.on_upload_clicked)
         self.btn_clear_list.clicked.connect(self.on_clear_clicked)
+
     
     def on_clear_clicked(self):
         """点击垃圾桶按钮的回调"""
@@ -182,3 +205,93 @@ class PreviewPanel(QFrame):
         )
         if file_path:
             self.asset_tree.add_asset(file_path)
+        
+    def start_preview_animation(self, asset_path, segment_name, start, end):
+        """响应 AssetTree 信号：开始播放指定片段"""
+        self.current_asset_path = asset_path
+        self.current_range = (start, end)
+        self.current_frame_relative_idx = 0
+        
+        # 提取 ZIP 里的图片列表
+        try:
+            with zipfile.ZipFile(asset_path, 'r') as z:
+                exts = ('.png', '.jpg', '.jpeg', '.webp', '.svg')
+                # 必须排序，确保与 JSON 里的 start/end 对应
+                self.frame_names = sorted([f for f in z.namelist() if f.lower().endswith(exts)])
+        except:
+            self.frame_names = []
+
+        self.title_label.setText(f"PREVIEW: {segment_name}")
+        self.play_timer.start(100) # 默认 10 FPS
+        self.update_play_button_icon(is_playing=True)
+        self.render_current_frame()
+
+    def toggle_play(self):
+        if self.play_timer.isActive():
+            self.play_timer.stop()
+            self.update_play_button_icon(is_playing=False)
+        else:
+            if self.current_asset_path:
+                self.play_timer.start(100)
+                self.update_play_button_icon(is_playing=True)
+
+    def auto_next_frame(self):
+        """自动播放：循环步进"""
+        start, end = self.current_range
+        total = end - start + 1
+        if total <= 0: return
+        
+        self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total
+        self.render_current_frame()
+
+    def next_frame_manual(self):
+        """逐帧下一帧：停止播放并步进"""
+        self.play_timer.stop()
+        self.update_play_button_icon(is_playing=False)
+        
+        start, end = self.current_range
+        total = end - start + 1
+        if total > 0:
+            self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total
+            self.render_current_frame()
+
+    def prev_frame_manual(self):
+        """逐帧上一帧：停止播放并回退"""
+        self.play_timer.stop()
+        self.update_play_button_icon(is_playing=False)
+        
+        start, end = self.current_range
+        total = end - start + 1
+        if total > 0:
+            self.current_frame_relative_idx = (self.current_frame_relative_idx - 1) % total
+            self.render_current_frame()
+
+    def render_current_frame(self):
+        """纯粹的渲染函数：不修改索引"""
+        if not self.current_asset_path or not self.frame_names:
+            return
+
+        start_val, end_val = self.current_range
+        # 关键修正：JSON 的 1 对应列表的 0
+        base_idx = start_val - 1
+        real_idx = base_idx + self.current_frame_relative_idx
+        
+        if 0 <= real_idx < len(self.frame_names):
+            try:
+                with zipfile.ZipFile(self.current_asset_path, 'r') as z:
+                    img_data = z.read(self.frame_names[real_idx])
+                    img = QImage.fromData(img_data)
+                    if not img.isNull():
+                        pixmap = QPixmap.fromImage(img)
+                        self.preview_screen.setPixmap(pixmap.scaled(
+                            self.preview_screen.size(), 
+                            Qt.KeepAspectRatio, 
+                            Qt.FastTransformation
+                        ))
+            except: pass
+
+    def update_play_button_icon(self, is_playing):
+        icon_name = "pause" if is_playing else "play"
+        icon_path = get_resource_path(f"assets/icons/{icon_name}.svg")
+        if os.path.exists(icon_path):
+            self.btns["play"].setIcon(QIcon(icon_path))
