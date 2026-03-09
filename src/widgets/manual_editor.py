@@ -244,6 +244,9 @@ class ManualEditor(QWidget):
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
 
+        self.sync_to_preview()
+
+
     def on_do_slice(self):
         bg_item = next((i for i in self.scene.items() 
                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
@@ -262,6 +265,14 @@ class ManualEditor(QWidget):
             self.btn_pick.setChecked(False) 
             self.update_frame_list_ui() 
             self.frame_list.setCurrentRow(0) 
+        
+            self.sync_to_preview() # <--- 在这里调用
+
+    def sync_to_preview(self):
+        """裁切完成后，只推送数据"""
+        main_win = self.window()
+        if hasattr(main_win, 'preview_panel'):
+            main_win.preview_panel.load_frames_from_editor(self.current_frames)
 
     def update_frame_list_ui(self):
         self.frame_list.clear()
@@ -293,6 +304,13 @@ class ManualEditor(QWidget):
         except (RuntimeError, AttributeError):
             self.preview_item = QGraphicsPixmapItem(pix)
             self.scene.addItem(self.preview_item)
+        
+        main_win = self.window()
+        if hasattr(main_win, 'preview_panel'):
+            panel = main_win.preview_panel
+            panel.play_timer.stop()
+            panel.current_frame_relative_idx = index
+            panel.update_preview() # 这里只会执行上面改好的简版渲染
 
     # 为了让 ScalableView 的 drop 生效，父级也需要接受 dragEnter
     def dragEnterEvent(self, event):

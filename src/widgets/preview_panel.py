@@ -104,6 +104,7 @@ class PreviewPanel(QFrame):
             
         playback_layout.addStretch()
         layout.addLayout(playback_layout)
+        
 
         # 6. 资产树容器 (设置为与预览屏幕一致的 #181825)
         self.tree_container = QWidget()
@@ -448,3 +449,53 @@ class PreviewPanel(QFrame):
         icon_path = get_resource_path(f"assets/icons/{icon_name}.svg")
         if os.path.exists(icon_path):
             self.btns["play"].setIcon(QIcon(icon_path))
+    
+    def load_frames_from_editor(self, frames_data):
+        """核心：只负责接收图片数据并显示第一帧"""
+        self.play_timer.stop()
+        if "play" in self.btns:
+            self.btns["play"].setChecked(False)
+            self.update_play_button_icon(False)
+
+        # 仅缓存 Pixmap 列表
+        self.current_frames_cache = [f["pixmap"] for f in frames_data]
+        
+        if not self.current_frames_cache:
+            if hasattr(self, 'preview_screen'):
+                self.preview_screen.clear()
+            return
+
+        # 重置到第一帧
+        self.current_range = (0, len(self.current_frames_cache) - 1)
+        self.current_frame_relative_idx = 0
+        
+        # 仅触发渲染，不操作任何进度条
+        self.update_preview()
+
+    def update_preview(self):
+        """核心：只负责把图片画在 preview_screen 上"""
+        if not self.current_frames_cache:
+            return
+
+        try:
+            # 获取当前帧 Pixmap
+            abs_idx = self.current_range[0] + self.current_frame_relative_idx
+            if abs_idx >= len(self.current_frames_cache):
+                abs_idx = self.current_range[0]
+
+            pixmap = self.current_frames_cache[abs_idx]
+            
+            # 缩放并显示（保持你原有的比例逻辑）
+            container_size = self.preview_screen.size()
+            margin_factor = 0.85 
+            scaled_pixmap = pixmap.scaled(
+                container_size.width() * margin_factor, 
+                container_size.height() * margin_factor,
+                Qt.KeepAspectRatio, 
+                Qt.FastTransformation 
+            )
+            self.preview_screen.setPixmap(scaled_pixmap)
+            self.preview_screen.setAlignment(Qt.AlignCenter)
+            
+        except Exception as e:
+            print(f"预览渲染失败: {e}")
