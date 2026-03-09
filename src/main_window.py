@@ -8,10 +8,10 @@ from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
 from .logic_upload import UploadLogic 
 from .logic_export import ExportLogic
-from .logic_slice import SliceLogic
+# from .logic_slice import SliceLogic
 from .widgets.manual_editor import ManualEditor
 
-class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic): 
+class BingoPacker(QMainWindow, UploadLogic, ExportLogic): 
     def __init__(self):
         super().__init__()
         # 还原原版核心变量名
@@ -129,7 +129,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic, SliceLogic):
         # 1. 基础功能
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
-        self.btn_slice.clicked.connect(self.on_slice_clicked)
+        # self.btn_slice.clicked.connect(self.on_slice_clicked)
         self.btn_preview.clicked.connect(self.toggle_side_preview)
 
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名

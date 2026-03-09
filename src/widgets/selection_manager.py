@@ -272,55 +272,6 @@ class SelectionManager:
         # 4. 更新显示
         bg_item.setPixmap(result_pixmap)
     
-
-    def get_sorted_selections(self):
-        """
-        按照“从上到下，从左到右”的逻辑返回排序后的矩形区域
-        """
-        valid_items = self._get_valid_selections()
-        if not valid_items:
-            return []
-
-        # 1. 提取所有区域的 boundingBox 和中心点
-        # 即使是 PathItem，我们也取其整体的 sceneBoundingRect
-        data = []
-        for item in valid_items:
-            rect = item.sceneBoundingRect()
-            data.append({
-                'rect': rect,
-                'center_y': rect.center().y(),
-                'center_x': rect.center().x(),
-                'height': rect.height()
-            })
-
-        # 2. 计算平均高度作为分行阈值
-        avg_height = sum(d['height'] for d in data) / len(data)
-        row_threshold = avg_height * 0.5
-
-        # 3. 排序逻辑
-        # 先按 Y 绝对排序
-        data.sort(key=lambda d: d['center_y'])
-
-        final_sorted = []
-        current_row = []
-        
-        if data:
-            last_y = data[0]['center_y']
-            for d in data:
-                if abs(d['center_y'] - last_y) < row_threshold:
-                    current_row.append(d)
-                else:
-                    # 行内按 X 排序
-                    current_row.sort(key=lambda x: x['center_x'])
-                    final_sorted.extend([r['rect'] for r in current_row])
-                    current_row = [d]
-                    last_y = d['center_y']
-            
-            # 处理最后一行
-            current_row.sort(key=lambda x: x['center_x'])
-            final_sorted.extend([r['rect'] for r in current_row])
-
-        return final_sorted
     
     def _permanently_erase_pixels(self, bg_item, rect):
         """
@@ -413,3 +364,63 @@ class SelectionManager:
 
         bg_item.update()
         self.scene.update()
+    
+    def get_sorted_selections(self):
+        """
+        按照“从上到下，从左到右”的逻辑返回相对于底图的矩形区域
+        """
+        valid_items = self._get_valid_selections()
+        if not valid_items:
+            return []
+
+        # 获取底图对象，用于坐标转换
+        bg_item = next((i for i in self.scene.items() if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+
+        data = []
+        for item in valid_items:
+            # 1. 获取场景矩形并转为底图局部矩形
+            scene_rect = item.sceneBoundingRect()
+            if bg_item:
+                local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
+                # 转换成整数像素矩形，方便直接用于裁切
+                rect = QRect(local_top_left, scene_rect.size().toSize())
+            else:
+                rect = scene_rect.toRect()
+
+            data.append({
+                'rect': rect,
+                'center_y': rect.center().y(),
+                'center_x': rect.center().x(),
+                'height': rect.height()
+            })
+
+        # 2. 计算平均高度作为分行阈值
+        avg_height = sum(d['height'] for d in data) / len(data)
+        row_threshold = avg_height * 0.7  # 稍微调高阈值到 0.7，容错性更高
+
+        # 3. 排序逻辑
+        data.sort(key=lambda d: d['center_y'])
+
+        final_sorted = []
+        current_row = []
+        
+        if data:
+            # 使用当前行的起始 Y 值
+            row_y_reference = data[0]['center_y']
+            for d in data:
+                # 判断是否属于同一行
+                if abs(d['center_y'] - row_y_reference) < row_threshold:
+                    current_row.append(d)
+                else:
+                    # 处理旧行：行内按 X 排序
+                    current_row.sort(key=lambda x: x['center_x'])
+                    final_sorted.extend([r['rect'] for r in current_row])
+                    # 开启新行
+                    current_row = [d]
+                    row_y_reference = d['center_y']
+            
+            # 处理最后一行
+            current_row.sort(key=lambda x: x['center_x'])
+            final_sorted.extend([r['rect'] for r in current_row])
+
+        return final_sorted
