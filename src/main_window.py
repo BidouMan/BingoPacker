@@ -139,6 +139,8 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_bgs.clicked.connect(self.on_export_bgs)    
         self.btn_sprite.clicked.connect(self.on_export_sprite3)
 
+        self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
+
     # 供外部/PreviewPanel 调用的页面切换接口
     def toggle_editor_view(self):
         new_idx = 1 if self.left_stack.currentIndex() == 0 else 0

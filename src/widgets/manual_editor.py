@@ -2,12 +2,13 @@ import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
                                QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel,
                                QPushButton, QFrame,QButtonGroup, QAbstractItemView)
-from PySide6.QtCore import Qt, QRectF, QPoint, QSize
+from PySide6.QtCore import Qt, QRectF, QPoint, QSize,Signal
 from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent
 from .selection_manager import SelectionManager
 from ..logic_slice import SliceLogic
 
 class ManualEditor(QWidget):
+    slice_completed = Signal(str, list)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.slice_logic = SliceLogic() # 初始化逻辑类
@@ -264,15 +265,25 @@ class ManualEditor(QWidget):
             self.selection_manager.set_active(False) 
             self.btn_pick.setChecked(False) 
             self.update_frame_list_ui() 
-            self.frame_list.setCurrentRow(0) 
-        
+            self.frame_list.setCurrentRow(0)            
+
             self.sync_to_preview() # <--- 在这里调用
+
+            # --- 核心修复：在这里调用 AssetTree ---
+            # 发射信号 (假设你已经定义了 slice_completed = Signal(str, list))
+            source_name = os.path.basename(self.current_source_path or "Unknown")
+            # 尝试直接找 parent 的信号发射，或者简单点：
+            if hasattr(self, "slice_completed"):
+                self.slice_completed.emit(source_name, self.current_frames)
 
     def sync_to_preview(self):
         """裁切完成后，只推送数据"""
         main_win = self.window()
         if hasattr(main_win, 'preview_panel'):
-            main_win.preview_panel.load_frames_from_editor(self.current_frames)
+            # 统一调用这个接口
+            # 注意：传入的是纯 pixmap 列表
+            pixmaps = [f["pixmap"] for f in self.current_frames]
+            main_win.preview_panel.load_frames_to_preview(pixmaps)
 
     def update_frame_list_ui(self):
         self.frame_list.clear()

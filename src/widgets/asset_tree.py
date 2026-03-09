@@ -114,6 +114,7 @@ class AssetTree(QTreeWidget):
         # 监听交互
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.verticalScrollBar().valueChanged.connect(lambda: self._update_item_states())
+        self.itemClicked.connect(self.handle_item_clicked)
 
 
     def _get_all_visible_items(self):
@@ -666,3 +667,115 @@ class AssetTree(QTreeWidget):
     def dragMoveEvent(self, event): event.acceptProposedAction()
     def dropEvent(self, event):
         for url in event.mimeData().urls(): self.add_asset(url.toLocalFile())
+    
+
+    # -------------------------------------------------------
+
+    def add_editor_source(self, source_name, frames_data):
+        """
+        专门接收编辑器裁切后的数据
+        """
+        
+        root_name = f"Sliced: {source_name}"
+        frame_count = len(frames_data)
+        
+        # 1. 创建根节点逻辑...
+        root = QTreeWidgetItem(self)
+        root.setData(0, Qt.UserRole, "EDITOR_SOURCE")
+        # 提取 pixmap 列表存入节点，供 handle_item_clicked 预览使用
+        pixmaps = [f["pixmap"] for f in frames_data]
+        root.setData(0, Qt.UserRole + 1, pixmaps) 
+        root.setData(0, Qt.UserRole + 2, root_name)
+        root.setText(0, "") # 清空原生文字，防止重叠
+
+        # 2. 构建 UI (圆点、改名组件、S按钮、+按钮)
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(4)
+        
+        dot = QLabel("●")
+        dot.setStyleSheet("color: #89b4fa; font-size: 14px;")
+        
+        ns_widget = self._create_name_widget(root_name, 140)
+        
+        btn_s = QPushButton("S")
+        btn_s.setObjectName("AssetActionBtn")
+        btn_s.setFixedSize(22, 22)
+        
+        btn_add = QPushButton("+")
+        btn_add.setObjectName("AssetActionBtn")
+        btn_add.setFixedSize(22, 22)
+        btn_add.clicked.connect(lambda: self.add_segment(root, "New Segment", 1, frame_count))
+        
+        layout.addWidget(dot)
+        layout.addWidget(ns_widget)
+        layout.addStretch()
+        layout.addWidget(btn_s)
+        layout.addWidget(btn_add)
+        
+        self.setItemWidget(root, 0, container)
+
+        # 3. 默认添加片段
+        self.add_segment(root, "Full_Animation", 1, frame_count)
+        
+        root.setExpanded(True)
+        self._update_item_states()
+    
+    def handle_item_clicked(self, item, column):
+        parent = item.parent()
+        if not parent: return 
+
+        # 判定是否为编辑器来源的资源
+        if parent.data(0, Qt.UserRole) == "EDITOR_SOURCE":
+            full_pixmaps = parent.data(0, Qt.UserRole + 1)
+            if not full_pixmaps: return
+
+            # --- 关键修改：从 Widget 实时获取数值 ---
+            container = self.itemWidget(item, 0)
+            if container:
+                # 通过 ObjectName 找到 add_segment 里定义的输入框
+                s_edit = container.findChild(QLineEdit, "s_edit")
+                e_edit = container.findChild(QLineEdit, "e_edit")
+                
+                if s_edit and e_edit:
+                    try:
+                        start = int(s_edit.text())
+                        end = int(e_edit.text())
+                    except:
+                        start, end = 1, 1
+                else:
+                    # 如果找不到控件（防御逻辑），尝试读 Data
+                    stored = item.data(0, Qt.UserRole + 3)
+                    start, end = stored if stored else (1, 1)
+            else:
+                # 最后的兜底：正则解析
+                start, end = self.get_segment_range(item)
+            
+            # --- 逻辑修正确：Python 切片是 [start-1 : end] ---
+            # 确保索引不越界
+            start_idx = max(0, start - 1)
+            end_idx = min(len(full_pixmaps), end)
+            
+            segment_pixmaps = full_pixmaps[start_idx : end_idx]
+            
+            print(f"DEBUG: 点击了 {item}, 实时读取范围: {start}-{end}, 实际截取帧数: {len(segment_pixmaps)}")
+            
+            # 推送到预览
+            main_win = self.window()
+            if hasattr(main_win, "preview_panel"):
+                main_win.preview_panel.load_frames_to_preview(segment_pixmaps)
+
+    def get_segment_range(self, item):
+        import re
+        text = item.text(0)
+        # 正则解析：查找 (数字 - 数字) 格式
+        # \s* 表示允许任意空格
+        match = re.search(r'\((\d+)\s*-\s*(\d+)\)', text)
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(2))
+            return start, end
+        
+        # 如果没匹配到（可能是根节点），默认返回 1-1
+        return 1, 1

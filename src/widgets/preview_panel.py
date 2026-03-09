@@ -19,6 +19,7 @@ class PreviewPanel(QFrame):
         
         self.current_asset_path = None
         self.frame_names = []      # 当前 ZIP 内所有图片名列表
+        self.current_frames_cache = []
         self.current_range = (1, 1) # (start, end) 来自 JSON
         self.current_frame_relative_idx = 0 # 相对当前片段起始点的偏移
 
@@ -331,30 +332,33 @@ class PreviewPanel(QFrame):
             self.asset_tree.add_asset(file_path)
         
     def start_preview_animation(self, asset_path, segment_name, start, end):
-        """响应 AssetTree 信号：开始播放指定片段"""
+        """处理来自 .bgs / .sprite3 的 ZIP 动画"""
+        # 如果路径是特殊的标识符，直接跳过 ZIP 逻辑
+        if asset_path == "EDITOR_SOURCE":
+            return 
+
+        self.current_frames_cache = [] # 清空内存缓存
         self.current_asset_path = asset_path
         self.current_range = (start, end)
         self.current_frame_relative_idx = 0
-        
-        
 
-        # 提取 ZIP 里的图片列表
         try:
-            with zipfile.ZipFile(asset_path, 'r') as z:
-                exts = ('.png', '.jpg', '.jpeg', '.webp', '.svg')
-                # 必须排序，确保与 JSON 里的 start/end 对应
-                self.frame_names = sorted([f for f in z.namelist() if f.lower().endswith(exts)])
-        except:
-            self.frame_names = []
+            # 增加路径有效性检查
+            if os.path.exists(asset_path):
+                with zipfile.ZipFile(asset_path, 'r') as z:
+                    exts = ('.png', '.jpg', '.jpeg', '.webp', '.svg')
+                    self.frame_names = sorted([f for f in z.namelist() if f.lower().endswith(exts)])
+            else:
+                print(f"ZIP 文件不存在: {asset_path}")
+                return
+        except Exception as e:
+            print(f"ZIP 加载失败: {e}")
+            return
 
         self.title_label.setText(f"PREVIEW: {segment_name}")
-        # 修改这里：使用 slider 的当前值，而不是固定的 100
-        interval = int(1000 / max(1, self.speed_slider.value()))
-        self.play_timer.start(interval)
-
-
-        self.update_play_button_icon(is_playing=True)
-        self.render_current_frame()
+        self.update_preview()
+        self.play_timer.start(1000 // max(1, self.speed_slider.value()))
+        self.update_play_button_icon(True)
 
     def toggle_play(self):
         if self.play_timer.isActive():
@@ -368,13 +372,20 @@ class PreviewPanel(QFrame):
                 self.update_play_button_icon(is_playing=True)
 
     def auto_next_frame(self):
-        """自动播放：循环步进"""
-        start, end = self.current_range
-        total = end - start + 1
-        if total <= 0: return
-        
-        self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total
-        self.render_current_frame()
+        """自动播放下一帧：自适应数据源长度"""
+        # 计算当前片段的总帧数
+        total_in_segment = self.current_range[1] - self.current_range[0] + 1
+
+        if total_in_segment <= 0:
+            self.play_timer.stop()
+            return
+
+        # 进度递增并循环
+        self.current_frame_relative_idx += 1
+        if self.current_frame_relative_idx >= total_in_segment:
+            self.current_frame_relative_idx = 0
+
+        self.update_preview()
 
     def next_frame_manual(self):
         """逐帧下一帧：停止播放并步进"""
@@ -450,52 +461,60 @@ class PreviewPanel(QFrame):
         if os.path.exists(icon_path):
             self.btns["play"].setIcon(QIcon(icon_path))
     
-    def load_frames_from_editor(self, frames_data):
-        """核心：只负责接收图片数据并显示第一帧"""
-        self.play_timer.stop()
-        if "play" in self.btns:
-            self.btns["play"].setChecked(False)
-            self.update_play_button_icon(False)
-
-        # 仅缓存 Pixmap 列表
-        self.current_frames_cache = [f["pixmap"] for f in frames_data]
-        
-        if not self.current_frames_cache:
-            if hasattr(self, 'preview_screen'):
-                self.preview_screen.clear()
-            return
-
-        # 重置到第一帧
-        self.current_range = (0, len(self.current_frames_cache) - 1)
-        self.current_frame_relative_idx = 0
-        
-        # 仅触发渲染，不操作任何进度条
-        self.update_preview()
+    
 
     def update_preview(self):
-        """核心：只负责把图片画在 preview_screen 上"""
-        if not self.current_frames_cache:
-            return
+        """统一渲染：内存优先，文件靠后"""
+        # 1. 内存模式（编辑器裁切）
+        if self.current_frames_cache:
+            try:
+                abs_idx = (self.current_range[0] + self.current_frame_relative_idx) % len(self.current_frames_cache)
+                pixmap = self.current_frames_cache[abs_idx]
+                self._display_pixmap(pixmap)
+                return # <--- 关键：渲染完内存图片直接结束，不要往下走！
+            except Exception as e:
+                print(f"内存渲染失败: {e}")
+                return
 
-        try:
-            # 获取当前帧 Pixmap
-            abs_idx = self.current_range[0] + self.current_frame_relative_idx
-            if abs_idx >= len(self.current_frames_cache):
-                abs_idx = self.current_range[0]
+        # 2. 文件模式（ZIP）
+        # 只有路径不是编辑器标识且真实存在时才渲染
+        if self.current_asset_path and self.current_asset_path != "EDITOR_SOURCE":
+            self.render_current_frame()
 
-            pixmap = self.current_frames_cache[abs_idx]
-            
-            # 缩放并显示（保持你原有的比例逻辑）
-            container_size = self.preview_screen.size()
-            margin_factor = 0.85 
-            scaled_pixmap = pixmap.scaled(
-                container_size.width() * margin_factor, 
-                container_size.height() * margin_factor,
-                Qt.KeepAspectRatio, 
-                Qt.FastTransformation 
-            )
-            self.preview_screen.setPixmap(scaled_pixmap)
-            self.preview_screen.setAlignment(Qt.AlignCenter)
-            
-        except Exception as e:
-            print(f"预览渲染失败: {e}")
+    def _display_pixmap(self, pixmap):
+        """内部工具：负责最终把 pixmap 贴到标签上"""
+        container_size = self.preview_screen.size()
+        margin_factor = 0.85 
+        scaled_pixmap = pixmap.scaled(
+            container_size.width() * margin_factor, 
+            container_size.height() * margin_factor,
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation if not self.is_original_size else Qt.FastTransformation
+        )
+        self.preview_screen.setPixmap(scaled_pixmap)
+        self.preview_screen.setAlignment(Qt.AlignCenter)
+
+    # --------------------------------------------
+    def load_frames_to_preview(self, pixmaps):
+        """[唯一接口] 接收内存图片并立即播放"""
+        # 1. 强制重置所有状态，防止 ZIP 模式干扰
+        self.play_timer.stop()
+        self.current_asset_path = None
+        self.frame_names = []
+        
+        # 2. 载入新数据
+        self.current_frames_cache = pixmaps
+        
+        # 3. 关键：裁切模式的 range 必须从 0 开始
+        # 之前的 bug 可能出现在这里，如果点击树节点后传了 1-10，这里会索引越界
+        self.current_range = (0, len(pixmaps) - 1)
+        self.current_frame_relative_idx = 0
+        
+        # 4. 立即渲染第一帧并重新开启计时器
+        self.update_preview()
+        
+        fps = self.speed_slider.value() if hasattr(self, 'speed_slider') else 12
+        self.play_timer.start(1000 // fps)
+        
+        self.update_play_button_icon(True)
+        print(f"预览面板: 切换到动画片段，总计 {len(pixmaps)} 帧")
