@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, Q
 from PySide6.QtCore import Qt, QRectF, QPoint, QSize
 from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon
 from .selection_manager import SelectionManager
-from .logic_slice import SliceLogic
+from ..logic_slice import SliceLogic
 
 class ManualEditor(QWidget):
     def __init__(self, parent=None):

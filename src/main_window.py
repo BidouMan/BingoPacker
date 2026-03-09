@@ -8,10 +8,10 @@ from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
 from .logic_upload import UploadLogic 
 from .logic_export import ExportLogic
-# from .logic_slice import SliceLogic
+from .logic_slice import SliceLogic
 from .widgets.manual_editor import ManualEditor
 
-class BingoPacker(QMainWindow, UploadLogic, ExportLogic): 
+class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic): 
     def __init__(self):
         super().__init__()
         # 还原原版核心变量名
@@ -100,15 +100,16 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic):
         btn_layout.setSpacing(8)
         
         # 定义按钮 - 严格还原原始颜色和图标名
-        self.btn_upload = self.make_btn(" 导入", "#313244", "#45475a", "pick_folders")
-        self.btn_clear = self.make_btn(" 清空", "#313244", "#f38ba8", "clear_all")
-        self.btn_slice = self.make_btn(" 裁切", "#313244", "#fab387", "on_slice_clicked")
-        self.btn_preview = self.make_btn(" 预览", "#313244", "#a6e3a1", "toggle_side_preview")
+        self.btn_upload = self.make_btn(" 导入", "#313244", "#89b4fa", "pick_folders")
+        self.btn_clear = self.make_btn(" 清空", "#313244", "#89b4fa", "clear_all")
+        self.btn_editor = self.make_btn(' 编辑',"#313244", "#89b4fa", "btn_editor")
+        self.btn_slice = self.make_btn(" 裁切", "#313244", "#89b4fa", "on_slice_clicked")
+        self.btn_preview = self.make_btn(" 预览", "#313244", "#89b4fa", "toggle_side_preview")
         
         self.btn_bgs = self.make_btn("导出 .bgs", "#45b573", "#58ce87")
         self.btn_sprite = self.make_btn("导出 .sprite3", "#d9793d", "#e68a4d")
 
-        for b in [self.btn_upload, self.btn_clear, self.btn_slice, self.btn_preview]:
+        for b in [self.btn_upload, self.btn_clear, self.btn_editor,self.btn_slice, self.btn_preview]:
             btn_layout.addWidget(b)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_bgs)
@@ -129,11 +130,11 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic):
         # 1. 基础功能
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
-        # self.btn_slice.clicked.connect(self.on_slice_clicked)
+        self.btn_editor.clicked.connect(self.toggle_editor_view)
+        self.btn_slice.clicked.connect(self.on_slice_clicked)
         self.btn_preview.clicked.connect(self.toggle_side_preview)
 
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
-        # self.btn_bgs.clicked.connect(self.on_export_bgs)  
         self.btn_bgs.clicked.connect(self.on_export_bgs)    
         self.btn_sprite.clicked.connect(self.on_export_sprite3)
 
@@ -167,21 +168,17 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic):
             event.acceptProposedAction()
 
     # 在 main_window.py 的 dropEvent 中修改
+    # 在 main_window.py 中修改
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         for url in urls:
             path = url.toLocalFile()
-            
-            # 1. 如果是文件夹 -> 执行原有的打包逻辑
             if os.path.isdir(path):
                 self.process_import_path(path)
-                
-            # 2. 如果是单张图片 -> 切换到编辑器并显示
             elif path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 切换到编辑器页面 (Index 1)
-                self.left_stack.setCurrentIndex(1)
-                # 加载图片
-                if hasattr(self, 'editor_page'):
-                    self.editor_page.display_image(path)
-                self.add_log(f"-> 已载入图片: {os.path.basename(path)}", "#89b4fa")
+                if path not in self.asset_files:
+                    self.asset_files.append(path)
+                    self.add_log(f"-> 已载入图片: {os.path.basename(path)}", "#89b4fa")
+                else:
+                    self.add_log(f"-> 提示: 该图片已在列表中", "#f38ba8")
 

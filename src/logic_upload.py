@@ -90,10 +90,25 @@ class UploadLogic:
                     # 单图导入日志（完全对齐你要求的格式）
                     self.add_log(f"-> 单帧图片: <span style='color:#fab387;'>{os.path.basename(path)}</span>", "#fab387")
 
-    def add_log(self, msg, color="#cdd6f4"):
-        # 核心改动：只设置颜色和行高，不设置字体，让它自动继承 console 的 Consolas 字体
+    def add_log(self, msg, color="#cdd6f4", replace_last=False):
+        # 构造 HTML 内容
         log_html = f'<div style="color:{color}; line-height: 110%; margin-bottom: 2px;">{msg}</div>'
-        self.console.append(log_html)
+        
+        if replace_last:
+            # 获取光标
+            cursor = self.console.textCursor()
+            # 移动到最后并选中最后一行内容
+            cursor.movePosition(QTextCursor.End)
+            cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
+            # 删除最后一行
+            cursor.removeSelectedText()
+            # 插入新内容（进度条）
+            cursor.insertHtml(log_html)
+        else:
+            # 正常模式：直接追加
+            self.console.append(log_html)
+            
+        # 滚动到底部
         self.console.moveCursor(QTextCursor.End)
     
     def on_clear_content(self):
