@@ -13,7 +13,7 @@ class ManualEditor(QWidget):
         self.slice_logic = SliceLogic() # 初始化逻辑类
         self.current_frames = []        # 存储裁切后的帧数据: [{"pixmap": QPixmap, "rect": QRect}, ...]
         self.preview_item = None        # 用于显示单帧预览的 Item
-
+        self.current_source_path = None
         # --- 修复点 1：移除原本会导致 AttributeError 的行 ---
         # QWidget 没有 setRenderHint 等方法，这些已经移至下方的 ScalableView
         self.setAcceptDrops(True)       # 这里保留是为了让事件能传导
@@ -157,6 +157,36 @@ class ManualEditor(QWidget):
         self.btn_pick.toggled.connect(self.selection_manager.set_active)
         self.btn_slice.clicked.connect(self.on_do_slice)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
+        self.btn_save.clicked.connect(self.on_save_clicked)
+
+    def on_save_clicked(self):
+        """保存按钮逻辑"""
+        if not self.current_frames:
+            print("没有可保存的内容")
+            return
+        
+        if not self.current_source_path:
+            # 尝试从主窗口兜底获取一次
+            p = self.window() # 获取顶层窗口
+            if hasattr(p, 'asset_files') and p.asset_files:
+                self.current_source_path = p.asset_files[0]
+        
+        if not self.current_source_path:
+            print("找不到原始文件路径")
+            return
+
+        # 提取 pixmap 列表
+        pixmaps = [f["pixmap"] for f in self.current_frames]
+        
+        # 现在 SliceLogic 已经有了这个方法
+        save_dir = self.slice_logic.save_sliced_sprites(self.current_source_path, pixmaps)
+        
+        # 反馈日志到主界面控制台
+        main_win = self.window()
+        if hasattr(main_win, 'add_log'):
+            main_win.add_log("-> 保存完成", "#a6e3a1")
+            main_win.add_log(f"-> 文件夹:  {os.path.basename(save_dir)}", "#89b4fa")
+        
 
     def display_image(self, file_path):
         """显示导入的精灵图并更新左侧列表 - 补全定义版"""
@@ -165,6 +195,7 @@ class ManualEditor(QWidget):
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
 
+        self.current_source_path = file_path
         # --- 1. 严格清理阶段 ---
         self.frame_list.blockSignals(True) # 阻塞信号防止连锁反应
         
@@ -293,25 +324,31 @@ class ScalableView(QGraphicsView):
     # --- 修复点 3：实现画布区域专属的拖拽逻辑 ---
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+            # 必须 accept，否则后续会报 drag leave before drag enter
+            event.acceptProposedAction() 
+            event.accept() 
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+            event.accept()
 
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
             if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 通过 parent 向上寻找 ManualEditor 实例
+                # 查找 ManualEditor 实例并加载
                 p = self.parent()
                 while p:
                     if hasattr(p, 'display_image'):
                         p.display_image(path)
+                        # 重点：在这里也要同步更新主窗口的 asset_files，防止逻辑断层
+                        # 如果你能获取到 main_window，最好把 main_window.asset_files 也设为 [path]
                         break
                     p = p.parent()
                 event.acceptProposedAction()
+                event.accept()
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_in_factor = 1.25

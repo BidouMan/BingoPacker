@@ -131,6 +131,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
         self.btn_editor.clicked.connect(self.toggle_editor_view)
+        self.btn_editor.clicked.connect(self.toggle_side_preview)
         self.btn_slice.clicked.connect(self.on_slice_clicked)
         self.btn_preview.clicked.connect(self.toggle_side_preview)
 

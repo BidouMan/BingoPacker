@@ -279,3 +279,26 @@ class SliceLogic:
 
         # 4. 生成统一格式的预览数据 (复用 manual_slice 的画布逻辑)
         return self.run_manual_slice(type('obj', (object,), {'pixmap': lambda: q_pixmap}), final_sorted_rects)
+    
+    def save_sliced_sprites(self, source_path, pixmaps):
+        """
+        将编辑器切好的 QPixmap 列表物理保存到磁盘
+        """
+        if not source_path or not pixmaps:
+            return None
+
+        # 1. 构造输出文件夹 (原文件名 + _sliced)
+        img_name = os.path.basename(source_path)
+        name_base = os.path.splitext(img_name)[0]
+        output_dir = os.path.join(os.path.dirname(source_path), f"{name_base}")
+        
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # 2. 遍历保存
+        for idx, pixmap in enumerate(pixmaps):
+            save_name = f"{name_base}_{idx:02d}.png"
+            save_path = os.path.join(output_dir, save_name)
+            pixmap.save(save_path, "PNG")
+            
+        return output_dir
