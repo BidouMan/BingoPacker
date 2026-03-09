@@ -219,3 +219,63 @@ class SliceLogic:
             })
             
         return frames_data
+
+    def run_auto_slice_to_preview(self, q_pixmap):
+        """
+        自动识别算法：将 QPixmap 转换为 OpenCV 处理，返回预览用的帧数据列表
+        """
+        # 1. QPixmap 转 OpenCV (通过 bytes 中转最稳健)
+        from PySide6.QtCore import QBuffer, QIODevice
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        q_pixmap.save(buffer, "PNG")
+        file_bytes = np.frombuffer(buffer.data(), dtype=np.uint8)
+        src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+        
+        if src is None: return []
+        
+        # 2. 复用你之前的 OpenCV 识别逻辑 (闭运算 + 轮廓提取)
+        alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        gap_threshold = 3 
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_threshold, gap_threshold))
+        closed_alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed_alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        raw_rects = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            if w < 2 or h < 2: continue
+            roi_alpha = alpha[y:y+h, x:x+w]
+            coords = cv2.findNonZero(roi_alpha)
+            if coords is not None:
+                ix, iy, iw, ih = cv2.boundingRect(coords)
+                # 存为 QRect 格式方便后续统一处理
+                from PySide6.QtCore import QRect
+                raw_rects.append(QRect(x + ix, y + iy, iw, ih))
+
+        if not raw_rects: return []
+
+        # 3. 复用你之前的行排序逻辑
+        # 注意：这里 raw_rects 已经是 QRect 对象，访问属性用 .y() .height() 等
+        raw_rects.sort(key=lambda r: (r.y() + r.height()/2))
+        
+        final_sorted_rects = []
+        current_row = []
+        avg_h = sum(r.height() for r in raw_rects) / len(raw_rects)
+        row_threshold = avg_h * 0.6
+        
+        last_center_y = raw_rects[0].y() + raw_rects[0].height()/2
+        for r in raw_rects:
+            curr_center_y = r.y() + r.height()/2
+            if abs(curr_center_y - last_center_y) < row_threshold:
+                current_row.append(r)
+            else:
+                current_row.sort(key=lambda rect: rect.x())
+                final_sorted_rects.extend(current_row)
+                current_row = [r]
+                last_center_y = curr_center_y
+        current_row.sort(key=lambda rect: rect.x())
+        final_sorted_rects.extend(current_row)
+
+        # 4. 生成统一格式的预览数据 (复用 manual_slice 的画布逻辑)
+        return self.run_manual_slice(type('obj', (object,), {'pixmap': lambda: q_pixmap}), final_sorted_rects)

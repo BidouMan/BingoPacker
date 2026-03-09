@@ -220,35 +220,35 @@ class ManualEditor(QWidget):
 
     
     def on_do_slice(self):
-        """点击裁切按钮后的交互逻辑"""
-        # A. 获取排序后的选区坐标 (相对于底图)
-        rects = self.selection_manager.get_sorted_selections()
-        
-        # B. 找到底图对象
+        """裁切按钮逻辑：有选区则按选区裁，无选区则自动识别裁"""
+        # 1. 找到底图对象
         bg_item = next((i for i in self.scene.items() 
                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-        
-        if not rects or not bg_item:
+        if not bg_item:
             return
 
-        # C. 调用逻辑类生成 Pixmap 列表
-        self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
+        # 2. 获取选区坐标
+        rects = self.selection_manager.get_sorted_selections()
         
+        if rects:
+            # --- 情况 A: 存在手动选区 ---
+            print("执行手动选区裁切...")
+            self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
+        else:
+            # --- 情况 B: 无选区，执行自动识别 ---
+            print("未发现选区，执行智能自动识别...")
+            # 我们需要把当前底图的 QPixmap 传给逻辑类进行分析
+            self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
+
+        # 3. 后续通用 UI 更新
         if self.current_frames:
-            # 1. 更新 UI 状态
-            bg_item.setVisible(False)
-            
-            # 2. 【新增】执行清空全部选区
-            # 这会清理掉场景中的虚线框和半透明遮罩
-            self.selection_manager.clear_selections() 
-            
-            # 3. 关闭选取模式，让工具栏状态同步
-            self.selection_manager.set_active(False)
+            bg_item.setVisible(False) # 隐藏原图
+            self.selection_manager.clear_selections() # 清理残留虚线框
+            self.selection_manager.set_active(False) # 关闭选取模式
             self.btn_pick.setChecked(False) 
             
-            # 4. 更新列表并显示
-            self.update_frame_list_ui()
-            self.frame_list.setCurrentRow(0)
+            self.update_frame_list_ui() # 更新左侧列表
+            self.frame_list.setCurrentRow(0) # 默认选中第一帧预览
 
     def update_frame_list_ui(self):
         """将切好的帧显示在左侧 - 优化显示布局"""
