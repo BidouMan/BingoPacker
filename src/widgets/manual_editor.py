@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, Q
                                QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel,
                                QPushButton, QFrame,QButtonGroup, QAbstractItemView)
 from PySide6.QtCore import Qt, QRectF, QPoint, QSize
-from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon
+from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent
 from .selection_manager import SelectionManager
 from ..logic_slice import SliceLogic
 
@@ -13,10 +13,14 @@ class ManualEditor(QWidget):
         self.slice_logic = SliceLogic() # 初始化逻辑类
         self.current_frames = []        # 存储裁切后的帧数据: [{"pixmap": QPixmap, "rect": QRect}, ...]
         self.preview_item = None        # 用于显示单帧预览的 Item
+
+        # --- 修复点 1：移除原本会导致 AttributeError 的行 ---
+        # QWidget 没有 setRenderHint 等方法，这些已经移至下方的 ScalableView
+        self.setAcceptDrops(True)       # 这里保留是为了让事件能传导
         self.init_ui()
 
     def init_ui(self):
-        # 整体 QSS 样式
+        # 整体 QSS 样式 (完全保留你的原始 QSS)
         self.setStyleSheet("""
             QWidget { background-color: #4E5357; color: #cdd6f4; border: 2px solid #313244; }
             
@@ -83,32 +87,22 @@ class ManualEditor(QWidget):
         self.frame_list = QListWidget()
         self.frame_list.setFixedWidth(82)
         
-        # 1. 基础模式
         self.frame_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.frame_list.setFlow(QListWidget.Flow.TopToBottom)
         self.frame_list.setMovement(QListWidget.Movement.Static)
-        
-        # 2. 彻底禁用网格对齐，允许 Item 自由重叠/裁剪
-        # 将 GridSize 设为空，意味着由 Item 的 SizeHint 决定位置
         self.frame_list.setGridSize(QSize()) 
-        
-        # 3. 强制关闭换行和自适应留白
         self.frame_list.setWrapping(False) 
         self.frame_list.setResizeMode(QListWidget.ResizeMode.Fixed)
-        self.frame_list.setSpacing(2) # 仅保留微小间距
-        
-        # 4. 滚动模式保持像素级
-        # self.frame_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.frame_list.setSpacing(2) 
         self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         main_layout.addWidget(self.frame_list)
 
-
         # --- 右侧：工具栏 + 画布 ---
         right_container = QVBoxLayout()
-        right_container.setSpacing(0) # 让工具栏和画布紧贴
+        right_container.setSpacing(0) 
 
-        # 1. 工具栏
+        # 1. 工具栏 (完全保留你的原始布局)
         self.toolbar = QFrame()
         self.toolbar.setObjectName("Toolbar")
         toolbar_layout = QHBoxLayout(self.toolbar)
@@ -116,42 +110,31 @@ class ManualEditor(QWidget):
         toolbar_layout.setSpacing(4)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
-
-        # 添加占位按钮
-        # 1. 创建工具组实现互斥选中
         self.tool_group = QButtonGroup(self)
-        self.tool_group.setExclusive(True) # 开启互斥模式
+        self.tool_group.setExclusive(True) 
 
-        # 2. 设置“选取”按钮
-        self.btn_pick = QPushButton() # 移除文字
-        self.btn_pick.setCheckable(True) # 开启可选中状态
-        # self.btn_pick.setChecked(True)   # 默认选中第一个
+        self.btn_pick = QPushButton() 
+        self.btn_pick.setCheckable(True) 
         self.btn_pick.setToolTip("选取工具")
-        # 加载 SVG 图标
         icon_path = os.path.join("assets", "icons", "btn_pick.svg")
         self.btn_pick.setIcon(QIcon(icon_path))
-        self.btn_pick.setIconSize(QSize(16, 16)) # 18px 在 32px 的工具栏里视觉最平衡
+        self.btn_pick.setIconSize(QSize(16, 16)) 
 
-        # 3. 设置其他按钮（也要设为 Checkable 才能加入互斥组）
-        self.btn_slice = QPushButton() # 假设缩短文字或也换成图标
+        self.btn_slice = QPushButton() 
         self.btn_slice.setCheckable(True)
         icon_path = os.path.join("assets", "icons", "on_slice_clicked.svg")
         self.btn_slice.setIcon(QIcon(icon_path))
-        self.btn_slice.setIconSize(QSize(16, 16)) # 18px 在 32px 的工具栏里视觉最平衡
+        self.btn_slice.setIconSize(QSize(16, 16)) 
 
-
-        self.btn_clear = QPushButton("清空") # 清空通常是触发式按钮，不需要 Checkable，可以不加进 group
+        self.btn_clear = QPushButton("清空") 
         self.btn_save = QPushButton()
         icon_path = os.path.join("assets", "icons", "btn_save.svg")
         self.btn_save.setIcon(QIcon(icon_path))
-        self.btn_slice.setIconSize(QSize(16, 16))
+        self.btn_save.setIconSize(QSize(16, 16))
 
-        # 4. 将需要互斥的工具加入组
         self.tool_group.addButton(self.btn_pick)
         self.tool_group.addButton(self.btn_slice)
 
-
-        # 5. 添加到布局
         toolbar_layout.addWidget(self.btn_pick)
         toolbar_layout.addWidget(self.btn_slice)
         toolbar_layout.addWidget(self.btn_clear)
@@ -159,8 +142,7 @@ class ManualEditor(QWidget):
 
         # 2. 画布区
         self.scene = QGraphicsScene()
-        self.view = ScalableView(self.scene)
-        # 让画布稍微带一点顶部圆角
+        self.view = ScalableView(self.scene) # 传入 self.scene
         self.view.setStyleSheet("border-top-left-radius: 0px; border-top-right-radius: 0px;")
 
         right_container.addWidget(self.toolbar)
@@ -169,28 +151,36 @@ class ManualEditor(QWidget):
         main_layout.addLayout(right_container)
 
         self.selection_manager = SelectionManager(self.scene)
-
         self.set_connect()
 
     def set_connect(self):
-        # 1. 选取工具开关
         self.btn_pick.toggled.connect(self.selection_manager.set_active)
-        
-        # 2. 绑定裁切按钮
         self.btn_slice.clicked.connect(self.on_do_slice)
-        
-        # 3. 绑定左侧列表切换
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
 
     def display_image(self, file_path):
-        """显示导入的精灵图并更新左侧列表"""
+        """显示导入的精灵图并更新左侧列表 - 补全定义版"""
         if not os.path.exists(file_path): return
         
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
 
-        # --- 更新画布 ---
+        # --- 1. 严格清理阶段 ---
+        self.frame_list.blockSignals(True) # 阻塞信号防止连锁反应
+        
+        if self.preview_item:
+            try: self.scene.removeItem(self.preview_item)
+            except: pass
+            self.preview_item = None
+
         self.scene.clear()
+        self.frame_list.clear()
+        self.current_frames = []
+        
+        if hasattr(self, 'selection_manager'):
+            self.selection_manager.clear_selections()
+
+        # --- 2. 画布加载 ---
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
         self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation) 
         self.scene.addItem(self.pixmap_item)
@@ -199,119 +189,129 @@ class ManualEditor(QWidget):
         self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
         self.view.centerOn(self.pixmap_item)
 
-        # --- 更新左侧列表 ---
-        self.frame_list.clear()
-        item = QListWidgetItem()
-        
+        # --- 3. 补全 canvas 定义并生成缩略图 ---
         icon_area = 45 
-        canvas = QPixmap(icon_area, icon_area)
+        # 必须先定义 canvas 才能传给 QPainter
+        canvas = QPixmap(icon_area, icon_area) 
         canvas.fill(Qt.GlobalColor.transparent)
+        
         thumb = pixmap.scaled(icon_area, icon_area, 
                              Qt.AspectRatioMode.KeepAspectRatio, 
                              Qt.TransformationMode.SmoothTransformation)
+        
         painter = QPainter(canvas)
+        # 居中绘制缩略图
         painter.drawPixmap((icon_area - thumb.width()) // 2, (icon_area - thumb.height()) // 2, thumb)
         painter.end()
         
-        item.setIcon(QIcon(canvas))
+        item = QListWidgetItem()
+        item.setIcon(QIcon(canvas)) # 现在 canvas 已定义
         item.setText(os.path.basename(file_path))
         item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         self.frame_list.addItem(item)
+        
+        self.frame_list.blockSignals(False)
+        self.frame_list.setCurrentRow(0)
 
-    
     def on_do_slice(self):
-        """裁切按钮逻辑：有选区则按选区裁，无选区则自动识别裁"""
-        # 1. 找到底图对象
         bg_item = next((i for i in self.scene.items() 
                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-        if not bg_item:
-            return
+        if not bg_item: return
 
-        # 2. 获取选区坐标
         rects = self.selection_manager.get_sorted_selections()
-        
         if rects:
-            # --- 情况 A: 存在手动选区 ---
-            print("执行手动选区裁切...")
             self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
-            # --- 情况 B: 无选区，执行自动识别 ---
-            print("未发现选区，执行智能自动识别...")
-            # 我们需要把当前底图的 QPixmap 传给逻辑类进行分析
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
-        # 3. 后续通用 UI 更新
         if self.current_frames:
-            bg_item.setVisible(False) # 隐藏原图
-            self.selection_manager.clear_selections() # 清理残留虚线框
-            self.selection_manager.set_active(False) # 关闭选取模式
+            bg_item.setVisible(False) 
+            self.selection_manager.clear_selections() 
+            self.selection_manager.set_active(False) 
             self.btn_pick.setChecked(False) 
-            
-            self.update_frame_list_ui() # 更新左侧列表
-            self.frame_list.setCurrentRow(0) # 默认选中第一帧预览
+            self.update_frame_list_ui() 
+            self.frame_list.setCurrentRow(0) 
 
     def update_frame_list_ui(self):
-        """将切好的帧显示在左侧 - 优化显示布局"""
         self.frame_list.clear()
         for i, frame in enumerate(self.current_frames):
             pix = frame["pixmap"]
             item = QListWidgetItem(f"帧 {i:02d}")
-            
-            # 设置固定尺寸，确保布局引擎不会因为文字长短产生额外偏移
             item.setSizeHint(QSize(78, 80)) 
-            
             icon_pix = pix.scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio, 
                                  Qt.TransformationMode.SmoothTransformation)
             item.setIcon(QIcon(icon_pix))
-            
-            # 关键：确保文本对齐方式不会撑大 Item 区域
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            
             self.frame_list.addItem(item)
 
     def switch_frame_preview(self, index):
-        """切换显示特定的帧 - 强力防崩溃版"""
-        if index < 0 or index >= len(self.current_frames):
-            return
-            
+        if index < 0 or index >= len(self.current_frames): return
         pix = self.current_frames[index]["pixmap"]
-
-        # 检查 item 是否存在且未被 C++ 端销毁
         try:
             if not hasattr(self, 'preview_item') or self.preview_item is None:
                 self.preview_item = QGraphicsPixmapItem()
                 self.scene.addItem(self.preview_item)
-            
-            # 尝试操作，如果底层对象已删除会触发 RuntimeError
             self.preview_item.setPixmap(pix)
             self.preview_item.setVisible(True)
             self.preview_item.setZValue(100)
-            
-            # 居中逻辑
             scene_rect = self.scene.sceneRect()
             self.preview_item.setPos(
                 scene_rect.center().x() - pix.width() / 2,
                 scene_rect.center().y() - pix.height() / 2
             )
         except (RuntimeError, AttributeError):
-            # 如果挂了，彻底重新生成一个
             self.preview_item = QGraphicsPixmapItem(pix)
             self.scene.addItem(self.preview_item)
 
+    # 为了让 ScalableView 的 drop 生效，父级也需要接受 dragEnter
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
 
-# 自定义视图类 (ScalableView 保持不变)
+# 自定义视图类 (修正点 2：将渲染设置和拖拽逻辑放入此类)
 class ScalableView(QGraphicsView):
     def __init__(self, scene):
         super().__init__(scene)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # --- 将原本在 ManualEditor 的设置挪到这里 ---
         self.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        self.setDragMode(QGraphicsView.NoDrag)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setBackgroundBrush(Qt.GlobalColor.transparent)
+        
+        # 开启画布级别的拖拽接收
+        self.setAcceptDrops(True)
         
         self._is_panning = False
         self._last_mouse_pos = QPoint()
+
+    # --- 修复点 3：实现画布区域专属的拖拽逻辑 ---
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
+                # 通过 parent 向上寻找 ManualEditor 实例
+                p = self.parent()
+                while p:
+                    if hasattr(p, 'display_image'):
+                        p.display_image(path)
+                        break
+                    p = p.parent()
+                event.acceptProposedAction()
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_in_factor = 1.25
@@ -322,13 +322,15 @@ class ScalableView(QGraphicsView):
             self.scale(zoom_out_factor, zoom_out_factor)
 
     def mousePressEvent(self, event: QMouseEvent):
-        # 转换坐标到 Scene 坐标系
         scene_pos = self.mapToScene(event.pos())
-        
         if event.button() == Qt.MouseButton.LeftButton:
-            # 只有当父级 ManualEditor 的选取工具激活时，才拦截
-            if hasattr(self.parent(), 'selection_manager'):
-                self.parent().selection_manager.handle_press(scene_pos, event.modifiers())
+            # 修改了判断方式，适应布局嵌套
+            p = self.parent()
+            while p:
+                if hasattr(p, 'selection_manager'):
+                    p.selection_manager.handle_press(scene_pos, event.modifiers())
+                    break
+                p = p.parent()
             event.accept()
         elif event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = True
@@ -340,9 +342,12 @@ class ScalableView(QGraphicsView):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         scene_pos = self.mapToScene(event.pos())
-        
-        if hasattr(self.parent(), 'selection_manager'):
-            self.parent().selection_manager.handle_move(scene_pos)
+        p = self.parent()
+        while p:
+            if hasattr(p, 'selection_manager'):
+                p.selection_manager.handle_move(scene_pos)
+                break
+            p = p.parent()
 
         if self._is_panning:
             delta = event.pos() - self._last_mouse_pos
@@ -356,9 +361,12 @@ class ScalableView(QGraphicsView):
     def mouseReleaseEvent(self, event: QMouseEvent):
         scene_pos = self.mapToScene(event.pos())
         if event.button() == Qt.MouseButton.LeftButton:
-            if hasattr(self.parent(), 'selection_manager'):
-                # 增加了 modifiers 参数传递
-                self.parent().selection_manager.handle_release(scene_pos, event.modifiers())
+            p = self.parent()
+            while p:
+                if hasattr(p, 'selection_manager'):
+                    p.selection_manager.handle_release(scene_pos, event.modifiers())
+                    break
+                p = p.parent()
             event.accept()
         elif event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = False
@@ -370,11 +378,12 @@ class ScalableView(QGraphicsView):
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         scene_pos = self.mapToScene(event.pos())
         if event.button() == Qt.MouseButton.LeftButton:
-            if hasattr(self.parent(), 'selection_manager'):
-                self.parent().selection_manager.handle_double_click(scene_pos)
+            p = self.parent()
+            while p:
+                if hasattr(p, 'selection_manager'):
+                    p.selection_manager.handle_double_click(scene_pos)
+                    break
+                p = p.parent()
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
-    
-
-    

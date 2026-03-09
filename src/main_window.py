@@ -171,9 +171,33 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
     # 在 main_window.py 中修改
     def dropEvent(self, event):
         urls = event.mimeData().urls()
+        if not urls: return
+
+        # --- 核心修复：如果是编辑器模式，且拖入的是单张图片，执行强制重置 ---
+        is_editor_mode = (self.left_stack.currentIndex() == 1)
+        
         for url in urls:
             path = url.toLocalFile()
-            if os.path.isdir(path):
+            
+            # 如果是编辑器模式且是图片：先清空，再加载（确保全局只有一个素材）
+            if is_editor_mode and path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
+                # 1. 清空主窗口的全局缓存
+                self.asset_files = [] 
+                self.selected_folders = []
+                
+                # 2. 调用编辑器的显示逻辑（它内部已经有了你要求的严格清理）
+                self.editor_page.display_image(path)
+                
+                # 3. 同步主窗口列表数据
+                self.asset_files.append(path)
+                
+                # 4. 打印一个干净的日志
+                self.console.clear() 
+                self.add_log(f"-> 编辑器已重载新素材: {os.path.basename(path)}", "#a6e3a1")
+                break # 编辑器模式通常一次只处理一张大图
+                
+            # 否则执行原本的追加逻辑（普通 Console 模式）
+            elif os.path.isdir(path):
                 self.process_import_path(path)
             elif path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
                 if path not in self.asset_files:
