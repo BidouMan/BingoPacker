@@ -23,7 +23,9 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
     def init_ui(self):
         self.setWindowTitle("Bingo Sprite Packer")
-        self.setFixedWidth(760)
+        # --- 布局优化：既然预览面板常驻(280px)，主窗口总宽度应适当增加 ---
+        # 原左侧 760 + 右侧 280 = 1040。如果你希望维持原感，建议设为 1040
+        self.setFixedWidth(1040) 
         self.setFixedHeight(620)
         
         # 样式还原 - 严格遵守原始代码
@@ -34,7 +36,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
                 border: 1px solid #313244; 
                 border-radius: 10px; 
                 padding: 5px; 
-                           font-family: 'Consolas', 'Monaco', 'Menlo', 'Microsoft YaHei', 'PingFang SC', monospace;
+                font-family: 'Consolas', 'Monaco', 'Menlo', 'Microsoft YaHei', 'PingFang SC', monospace;
                 font-size: 14px;
             }
             QPushButton { border-radius: 6px; color: white; font-weight: bold; background-color: #313244; }
@@ -49,7 +51,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
         # --- 左侧主区 ---
         self.main_container = QWidget()
-        self.main_container.setFixedWidth(760)
+        self.main_container.setFixedWidth(760) # 保持原左侧区域宽度不变
         main_layout = QVBoxLayout(self.main_container)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(12)
@@ -81,18 +83,22 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
             """)
         self.left_stack.addWidget(self.console)
 
-        # 页面 1: 编辑器占位
-        self.editor_page = ManualEditor() # <--- 替换掉原来简单的 QWidget
+        # 页面 1: 编辑器
+        self.editor_page = ManualEditor()
         self.left_stack.addWidget(self.editor_page)
 
         main_layout.addWidget(self.left_stack)
         
+        # --- 启动状态设置 ---
+        self.left_stack.setCurrentIndex(1) # 默认显示编辑器
+        
         self.setup_bottom_buttons(main_layout)
         self.global_layout.addWidget(self.main_container)
 
-        # --- 右侧预览区 ---
+        # --- 右侧预览区 (常驻显示) ---
         self.preview_panel = PreviewPanel()
-        self.preview_panel.setFixedWidth(0) 
+        # 关键修改：移除 setFixedWidth(0)，确保它以其内部定义的 280 宽度显示
+        self.preview_panel.setVisible(True) 
         self.global_layout.addWidget(self.preview_panel)
 
     def setup_bottom_buttons(self, layout):
@@ -131,9 +137,9 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
         self.btn_editor.clicked.connect(self.toggle_editor_view)
-        self.btn_editor.clicked.connect(self.toggle_side_preview)
+        # self.btn_editor.clicked.connect(self.toggle_side_preview)
         self.btn_slice.clicked.connect(self.on_slice_clicked)
-        self.btn_preview.clicked.connect(self.toggle_side_preview)
+        # self.btn_preview.clicked.connect(self.toggle_side_preview)
 
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
         self.btn_bgs.clicked.connect(self.on_export_bgs)    
@@ -147,24 +153,24 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.left_stack.setCurrentIndex(new_idx)
         return new_idx == 1
 
-    def toggle_side_preview(self):
-        """侧边栏动画 - 严格复刻原始代码"""
-        is_expanded = self.preview_panel.width() > 0
-        target_p = 0 if is_expanded else 280
-        target_w = 760 if is_expanded else 760 + 280
+    # def toggle_side_preview(self):
+    #     """侧边栏动画 - 严格复刻原始代码"""
+    #     is_expanded = self.preview_panel.width() > 0
+    #     target_p = 0 if is_expanded else 280
+    #     target_w = 760 if is_expanded else 760 + 280
 
-        self.anim_p = QPropertyAnimation(self.preview_panel, b"minimumWidth")
-        self.anim_p_max = QPropertyAnimation(self.preview_panel, b"maximumWidth")
-        self.anim_w = QPropertyAnimation(self, b"minimumWidth")
-        self.anim_w_max = QPropertyAnimation(self, b"maximumWidth")
+    #     self.anim_p = QPropertyAnimation(self.preview_panel, b"minimumWidth")
+    #     self.anim_p_max = QPropertyAnimation(self.preview_panel, b"maximumWidth")
+    #     self.anim_w = QPropertyAnimation(self, b"minimumWidth")
+    #     self.anim_w_max = QPropertyAnimation(self, b"maximumWidth")
 
-        for a in [self.anim_p, self.anim_p_max, self.anim_w, self.anim_w_max]:
-            a.setDuration(300)
-            a.setEasingCurve(QEasingCurve.OutCubic)
-            a.setEndValue(target_w if a.targetObject() == self else target_p)
+    #     for a in [self.anim_p, self.anim_p_max, self.anim_w, self.anim_w_max]:
+    #         a.setDuration(300)
+    #         a.setEasingCurve(QEasingCurve.OutCubic)
+    #         a.setEndValue(target_w if a.targetObject() == self else target_p)
 
-        self.anim_p.start(); self.anim_p_max.start()
-        self.anim_w.start(); self.anim_w_max.start()
+    #     self.anim_p.start(); self.anim_p_max.start()
+    #     self.anim_w.start(); self.anim_w_max.start()
     
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
