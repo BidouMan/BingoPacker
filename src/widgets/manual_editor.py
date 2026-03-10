@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QRectF, QPoint, QSize,Signal
 from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent,QBrush,QColor,QTransform
 from .selection_manager import SelectionManager
 from ..logic_slice import SliceLogic
+from .asset_loader import AssetLoader
 
 class ManualEditor(QWidget):
     slice_completed = Signal(str, list)
@@ -287,22 +288,26 @@ class ManualEditor(QWidget):
 
         self.scene.setSceneRect(new_rect)
 
-        if hasattr(self.view, 'checker_item') and self.view.checker_item:
+        # 如果棋盘格丢失则重建
+        if not self.view.checker_item:
+            self.view.checker_item = CheckerboardItem(new_rect)
+            self.scene.addItem(self.view.checker_item)
+        else:
             self.view.checker_item.set_rect(new_rect)
 
+        # --- 核心修复：如果 preview_item 为 None (被 clear 删了)，则新建 ---
         if self.preview_item is None:
             self.preview_item = QGraphicsPixmapItem()
+            self.preview_item.setZValue(1) # 确保在棋盘格上方
             self.scene.addItem(self.preview_item)
         
+        # 此时 self.preview_item 一定是一个有效的 C++ 对象
         self.preview_item.setPixmap(pix)
         self.preview_item.setPos(0, 0)
-        self.preview_item.setVisible(True)
-        self.preview_item.setZValue(1)
-        # --- 核心修改：预览图层也使用 FastTransformation ---
         self.preview_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+        self.preview_item.setVisible(True)
 
         self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
-        self.sync_to_preview()
 
     # 为了让 ScalableView 的 drop 生效，父级也需要接受 dragEnter
     def dragEnterEvent(self, event):
@@ -311,6 +316,41 @@ class ManualEditor(QWidget):
         else:
             super().dragEnterEvent(event)
 
+    # 在 manual_editor.py 的 ManualEditor 类中添加
+    def load_bundle_file(self, file_path):
+        """处理拖入的文件（图片或包）"""
+        if not os.path.exists(file_path): return
+        
+        self.frame_list.blockSignals(True)
+        
+        # --- 核心修复：清理阶段 ---
+        self.scene.clear()          # 这会销毁 C++ 层的 preview_item
+        self.preview_item = None    # 必须手动同步 Python 层的引用，设为 None
+        self.view.checker_item = None # 棋盘格同理，也被 clear 删了，设为 None
+        
+        self.frame_list.clear()
+        self.current_frames = []
+        self.current_source_path = file_path
+
+        # 加载资源 (假设你已经用了 AssetLoader 或者之前的逻辑)
+        frames = AssetLoader.load_resource(file_path) # 或者你之前的逻辑
+
+        if frames:
+            self.current_frames = frames
+            self.update_frame_list_ui()
+            
+            # 重新初始化棋盘格 (因为场景被清空了)
+            first_pix = frames[0]["pixmap"]
+            rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            self.view.checker_item = CheckerboardItem(rect)
+            self.scene.addItem(self.view.checker_item)
+            
+            # 选中并显示第一帧
+            self.frame_list.setCurrentRow(0)
+            self.switch_frame_preview(0)
+
+        
+        self.frame_list.blockSignals(False)
 # 自定义视图类 (修正点 2：将渲染设置和拖拽逻辑放入此类)
 class ScalableView(QGraphicsView):
     def __init__(self, scene):
@@ -340,33 +380,45 @@ class ScalableView(QGraphicsView):
         self.checker_item.set_rect(pixmap_rect)
  
     # --- 修复点 3：实现画布区域专属的拖拽逻辑 ---
+    # 在 manual_editor.py 修改 ScalableView 类
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            # 必须 accept，否则后续会报 drag leave before drag enter
-            event.acceptProposedAction() 
-            event.accept() 
+            urls = event.mimeData().urls()
+            for url in urls:
+                file_path = url.toLocalFile()
+                # 在这里增加对 .bgs 和 .sprite3 的判断
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bgs', '.sprite3')):
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if not urls: return
+        
+        file_path = urls[0].toLocalFile()
+        
+        # 获取 ManualEditor
+        editor = self.window().findChild(ManualEditor)
+        if not editor:
+            p = self.parent()
+            while p and not isinstance(p, ManualEditor): p = p.parent()
+            editor = p
+
+        if editor:
+            # 不管什么后缀，直接丢给加载函数，Loader 会自己判断
+            editor.load_bundle_file(file_path)
+                
+        event.acceptProposedAction()
+
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
             event.accept()
 
-    def dropEvent(self, event: QDropEvent):
-        urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
-            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 查找 ManualEditor 实例并加载
-                p = self.parent()
-                while p:
-                    if hasattr(p, 'display_image'):
-                        p.display_image(path)
-                        # 重点：在这里也要同步更新主窗口的 asset_files，防止逻辑断层
-                        # 如果你能获取到 main_window，最好把 main_window.asset_files 也设为 [path]
-                        break
-                    p = p.parent()
-                event.acceptProposedAction()
-                event.accept()
+    
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_in_factor = 1.25
