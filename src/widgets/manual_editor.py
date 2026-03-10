@@ -21,7 +21,6 @@ class ManualEditor(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        # 整体 QSS 样式 (完全保留你的原始 QSS)
         self.setStyleSheet("""
             QWidget { 
                 background-color: #282c34; 

@@ -203,13 +203,7 @@ class PreviewPanel(QFrame):
 
     def toggle_scale_mode(self):
         """切换自适应和原始尺寸模式"""
-        self.is_original_size = not self.is_original_size
-        
-        # # 可选：改变按钮颜色或图标来提示当前模式
-        # if self.is_original_size:
-        #     self.btns["btn_scale_mode"].setStyleSheet("color: #a6e3a1; background: #313244;")
-        # else:
-        #     self.btns["btn_scale_mode"].setStyleSheet("color: #a6adc8; background: #313244;")
+        self.is_original_size = not self.is_original_size        
             
         # 立即重新渲染当前帧
         self.render_current_frame()
@@ -364,53 +358,87 @@ class PreviewPanel(QFrame):
         self.update_play_button_icon(True)
 
     def toggle_play(self):
+        """切换播放/暂停状态：兼容磁盘路径和内存缓存模式，保留速度设置"""
         if self.play_timer.isActive():
             self.play_timer.stop()
             self.update_play_button_icon(is_playing=False)
         else:
-            if self.current_asset_path:
-                # 同样使用换算后的间隔
+            # 修改点：只要有磁盘资源 OR 有内存缓存，就允许播放
+            if self.current_asset_path or self.current_frames_cache:
+                # 保持你原有的速度换算逻辑不变
                 interval = int(1000 / max(1, self.speed_slider.value()))
                 self.play_timer.start(interval)
                 self.update_play_button_icon(is_playing=True)
 
     def auto_next_frame(self):
-        """自动播放下一帧：自适应数据源长度"""
-        # 计算当前片段的总帧数
-        total_in_segment = self.current_range[1] - self.current_range[0] + 1
+        """自动播放逻辑：必须兼容磁盘和内存两种模式"""
+        
+        # 模式 A: 磁盘 ZIP 模式
+        if self.current_asset_path:
+            total_frames = self.current_range[1] - self.current_range[0] + 1
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total_frames
+                self.render_current_frame()
+            else:
+                self.play_timer.stop()
 
-        if total_in_segment <= 0:
+        # 模式 B: 内存模式 (裁切后的动画)
+        elif self.current_frames_cache:
+            total_frames = len(self.current_frames_cache)
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total_frames
+                # 直接从缓存渲染，不要去调用 render_current_frame (那是读磁盘的)
+                self._display_pixmap(self.current_frames_cache[self.current_frame_relative_idx])
+            else:
+                self.play_timer.stop()
+        
+        # 没有任何数据时停止
+        else:
             self.play_timer.stop()
-            return
-
-        # 进度递增并循环
-        self.current_frame_relative_idx += 1
-        if self.current_frame_relative_idx >= total_in_segment:
-            self.current_frame_relative_idx = 0
-
-        self.update_preview()
+            self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
 
     def next_frame_manual(self):
-        """逐帧下一帧：停止播放并步进"""
+        """手动下一帧：支持 ZIP 模式和内存裁切模式"""
+        # 1. 停止自动播放
         self.play_timer.stop()
-        self.update_play_button_icon(is_playing=False)
+        # self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
+
+        # 2. 核心逻辑判断
+        if self.current_asset_path:
+            # 传统的 .bgs/.sprite3 模式
+            total_frames = self.current_range[1] - self.current_range[0] + 1
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total_frames
+                self.render_current_frame()
+        elif self.current_frames_cache:
+            # 新增：add_editor_source 内存模式
+            total_frames = len(self.current_frames_cache)
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total_frames
+                # 直接显示内存中的 Pixmap
+                self._display_pixmap(self.current_frames_cache[self.current_frame_relative_idx])
         
-        start, end = self.current_range
-        total = end - start + 1
-        if total > 0:
-            self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total
-            self.render_current_frame()
+        # self._update_progress_ui()
 
     def prev_frame_manual(self):
-        """逐帧上一帧：停止播放并回退"""
+        """手动上一帧：支持 ZIP 模式和内存裁切模式"""
         self.play_timer.stop()
-        self.update_play_button_icon(is_playing=False)
-        
-        start, end = self.current_range
-        total = end - start + 1
-        if total > 0:
-            self.current_frame_relative_idx = (self.current_frame_relative_idx - 1) % total
-            self.render_current_frame()
+        # self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
+
+        if self.current_asset_path:
+            # 传统的 .bgs/.sprite3 模式
+            total_frames = self.current_range[1] - self.current_range[0] + 1
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx - 1 + total_frames) % total_frames
+                self.render_current_frame()
+        elif self.current_frames_cache:
+            # 新增：add_editor_source 内存模式
+            total_frames = len(self.current_frames_cache)
+            if total_frames > 0:
+                self.current_frame_relative_idx = (self.current_frame_relative_idx - 1 + total_frames) % total_frames
+                self._display_pixmap(self.current_frames_cache[self.current_frame_relative_idx])
+
+        # self._update_progress_ui()
 
     def render_current_frame(self):
         """核心渲染：针对像素风格优化的渲染逻辑"""
@@ -492,7 +520,7 @@ class PreviewPanel(QFrame):
             container_size.width() * margin_factor, 
             container_size.height() * margin_factor,
             Qt.KeepAspectRatio, 
-            Qt.SmoothTransformation if not self.is_original_size else Qt.FastTransformation
+            Qt.FastTransformation
         )
         self.preview_screen.setPixmap(scaled_pixmap)
         self.preview_screen.setAlignment(Qt.AlignCenter)
@@ -520,4 +548,3 @@ class PreviewPanel(QFrame):
         self.play_timer.start(1000 // fps)
         
         self.update_play_button_icon(True)
-        print(f"预览面板: 切换到动画片段，总计 {len(pixmaps)} 帧")

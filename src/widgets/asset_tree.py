@@ -186,7 +186,7 @@ class AssetTree(QTreeWidget):
         btn_s.setIconSize(QSize(16, 16))
         btn_s.setFixedSize(22, 22)
         btn_s.setCursor(Qt.PointingHandCursor)
-        btn_s.clicked.connect(lambda: self._sync_asset_to_disk(root, ns_widget))
+        # btn_s.clicked.connect(lambda: self._sync_asset_to_disk(root, ns_widget))
         
         btn_add = QPushButton()
         btn_add.setObjectName("AssetActionBtn")
