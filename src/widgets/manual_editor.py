@@ -1,9 +1,9 @@
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
                                QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel,
-                               QPushButton, QFrame,QButtonGroup, QAbstractItemView)
+                               QPushButton, QFrame,QGraphicsItem, QAbstractItemView)
 from PySide6.QtCore import Qt, QRectF, QPoint, QSize,Signal
-from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent,QBrush,QColor,QTransform
 from .selection_manager import SelectionManager
 from ..logic_slice import SliceLogic
 
@@ -24,9 +24,27 @@ class ManualEditor(QWidget):
         # --- 1. QSS 样式 (保持不动) ---
         self.setStyleSheet("""
             QWidget { background-color: #282c34; color: #abb2bf; border: none; }
-            QListWidget { background-color: #21252b; border-right: 1px solid #181a1f; outline: none; padding: 5px; }
-            QListWidget::item { background-color: #2c313a; border-radius: 4px; margin-bottom: 4px; padding: 5px; }
-            QListWidget::item:selected { background-color: #3e4451; border: 1px solid #61afef; }
+            
+            /* 左侧列表区 */
+            QListWidget { 
+                background-color: #21252b; 
+                border-right: 1px solid #181a1f; 
+                outline: none; 
+                padding: 5px;
+                color: #ffffff; /* 强制未选中状态下文字为白色 */
+            }
+            QListWidget::item { 
+                background-color: #2c313a; 
+                border-radius: 4px; 
+                margin-bottom: 4px; 
+                padding: 5px;
+                color: #ffffff; /* 确保 item 内部文字也是白色 */
+            }
+            QListWidget::item:selected { 
+                background-color: #3e4451; 
+                border: 1px solid #61afef;
+                color: #ffffff; /* 选中时文字依然为白色 */
+            }
             QGraphicsView { background-color: #181a1f; border: none; }
             QPushButton { background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }
             QPushButton:hover { background-color: #3e4451; }
@@ -166,12 +184,24 @@ class ManualEditor(QWidget):
         if hasattr(self, 'selection_manager'):
             self.selection_manager.clear_selections()
 
+
         # --- 2. 画布加载 ---
+        # 1. 重新添加棋盘格 (因为 clear 会把所有 item 删掉)
+        self.checker_item = CheckerboardItem(QRectF(0, 0, pixmap.width(), pixmap.height()))
+        self.scene.addItem(self.checker_item)
+
+
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
         self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation) 
         self.scene.addItem(self.pixmap_item)
-        self.scene.setSceneRect(QRectF(pixmap.rect()))
+        # self.scene.setSceneRect(QRectF(pixmap.rect()))
+        # 确保图片在棋盘格上面
+        self.pixmap_item.setZValue(0)
         
+        # 设置场景范围
+        self.scene.setSceneRect(QRectF(0, 0, pixmap.width(), pixmap.height()))
+
+
         self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
         self.view.centerOn(self.pixmap_item)
 
@@ -298,12 +328,21 @@ class ScalableView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setBackgroundBrush(Qt.GlobalColor.transparent)
         
+        self.setBackgroundBrush(QColor(30, 33, 39)) # 设置默认的 PS 深灰色背景
+        
+        # 初始化棋盘格管理
+        self.checker_item = CheckerboardItem()
+        self.scene().addItem(self.checker_item)
         # 开启画布级别的拖拽接收
         self.setAcceptDrops(True)
         
         self._is_panning = False
         self._last_mouse_pos = QPoint()
 
+    def update_checkerboard(self, pixmap_rect):
+        """当图片载入或变化时，更新棋盘格的大小"""
+        self.checker_item.set_rect(pixmap_rect)
+ 
     # --- 修复点 3：实现画布区域专属的拖拽逻辑 ---
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -407,3 +446,80 @@ class ScalableView(QGraphicsView):
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
+
+    
+class CheckerboardItem(QGraphicsItem):
+    def __init__(self, rect=QRectF()):
+        super().__init__()
+        self.rect = rect
+        self.setZValue(-1) 
+        self.color1 = QColor(110, 110, 110)
+        self.color2 = QColor(100, 100, 100)
+
+    def set_rect(self, rect):
+        self.prepareGeometryChange()
+        self.rect = rect
+        self.update()
+
+    def boundingRect(self):
+        return self.rect
+
+    def paint(self, painter, option, widget):
+        if self.rect.isEmpty():
+            return
+
+        # 1. 获取当前缩放比例
+        current_transform = painter.worldTransform()
+        scale = current_transform.m11()
+        
+        # 2. 动态计算逻辑格子大小
+        import math
+        target_logic_side = 16.0 / scale
+        if target_logic_side < 1.0:
+            logic_side = 1.0 
+        else:
+            exponent = math.ceil(math.log2(target_logic_side))
+            logic_side = float(2 ** exponent)
+
+        # 3. 计算物理像素下的格子大小
+        phys_side = math.ceil(logic_side * scale)
+        
+        painter.save()
+        painter.setClipRect(self.rect)
+        
+        # 4. 创建物理纹理
+        tile = QPixmap(phys_side * 2, phys_side * 2)
+        tile.fill(self.color2)
+        tp = QPainter(tile)
+        tp.fillRect(0, 0, phys_side, phys_side, self.color1)
+        tp.fillRect(phys_side, phys_side, phys_side, phys_side, self.color1)
+        tp.end()
+
+        # 5. 【修复点】物理坐标映射与同步
+        # 获取图片左上角在视图（屏幕）中的物理像素位置
+        origin_in_view = current_transform.map(self.rect.topLeft())
+        
+        # 计算图片在视图中的物理尺寸
+        view_w = self.rect.width() * scale
+        view_h = self.rect.height() * scale
+
+        # 暂时重置 painter 变换，进入物理坐标系绘图
+        painter.setWorldTransform(QTransform())
+        
+        # 构建物理矩形
+        view_rect = QRectF(origin_in_view.x(), origin_in_view.y(), view_w, view_h)
+
+        # 设置刷子并对齐
+        brush = QBrush(tile)
+        
+        # 这里的关键：让刷子的起点偏移量等于图片在屏幕上的物理坐标
+        # 这样无论你怎么拖动，刷子的纹理原点会始终跟着 origin_in_view 走
+        brush_transform = QTransform()
+        brush_transform.translate(origin_in_view.x(), origin_in_view.y())
+        brush.setTransform(brush_transform)
+
+        painter.setBrush(brush)
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(view_rect)
+        
+        painter.restore()
