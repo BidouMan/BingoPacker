@@ -455,9 +455,9 @@ class CheckerboardItem(QGraphicsItem):
         self._last_side = -1
 
     def set_rect(self, rect):
-        self.prepareGeometryChange() # 通知场景几何改变，防止旧残影
+        self.prepareGeometryChange()
         self.rect = rect
-        self._cached_pixmap = None # 重置缓存
+        self._cached_pixmap = None 
         self.update()
 
     def boundingRect(self):
@@ -469,37 +469,52 @@ class CheckerboardItem(QGraphicsItem):
         painter.save()
         painter.setClipRect(self.rect)
         
-        # 强制使用当前缩放的整数倍，避免亚像素渲染
-        dpr = widget.devicePixelRatioF() if widget else 1.0
+        # 获取当前缩放倍率
         scale = painter.worldTransform().m11()
         
-        # 让格子大小固定为 8, 16, 32 这种适合像素画的尺寸，或根据缩放向下取整
-        side = max(2, int(16 / scale))
+        # --- 核心改进：非线性视觉对齐 ---
+        # 1. 计算理想逻辑尺寸（目标是视觉上看起来约 16px）
+        target_side = 16.0 / scale
         
-        if self._cached_pixmap is None or self._last_side != side:
+        # 2. 只有在放大到“逻辑尺寸小于1像素”时，才强制锁定为1.0
+        # 否则，我们让它保持在 target_side，但进行“步进式”取整，防止缩放时的细微抖动
+        if target_side < 1.0:
+            side = 1.0
+        else:
+            # 使用简单的取整或者保留 0.5 步长，能让缩放看起来更平滑
+            side = round(target_side)
+            if side < 1: side = 1
+
+        # 获取设备像素比
+        dpr = widget.devicePixelRatioF() if widget else 1.0
+        
+        # 只有在 side 发生显著变化时才更新纹理缓存，减少计算量
+        if self._cached_pixmap is None or abs(self._last_side - side) > 0.1:
             self._last_side = side
-            # 物理像素对齐
-            phys_side = int(side * dpr)
+            
+            # 物理像素尺寸
+            phys_side = max(1, int(side * dpr))
             tile = QPixmap(phys_side * 2, phys_side * 2)
             tile.setDevicePixelRatio(dpr)
             tile.fill(self.color2)
             
             tp = QPainter(tile)
-            # 这里的逻辑绘图要确保是整数
-            tp.fillRect(0, 0, side, side, self.color1)
-            tp.fillRect(side, side, side, side, self.color1)
+            # 在纹理内部，我们要画 side 长度的格子
+            tp.fillRect(0, 0, int(side), int(side), self.color1)
+            tp.fillRect(int(side), int(side), int(side), int(side), self.color1)
             tp.end()
             self._cached_pixmap = tile
 
         brush = QBrush(self._cached_pixmap)
+        
+        # 坐标对齐：确保起始点精确对齐到图片的 (0,0)
         brush_tx = QTransform()
-        # 关键：坐标必须取整，防止 0.5 像素偏移导致的模糊
-        brush_tx.translate(int(self.rect.x()), int(self.rect.y()))
+        brush_tx.translate(self.rect.x(), self.rect.y())
         brush.setTransform(brush_tx)
 
         painter.setBrush(brush)
         painter.setPen(Qt.NoPen)
-        # 像素风格严禁开启抗锯齿
+        # 像素软件中，棋盘格本身关闭抗锯齿会更干净
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.drawRect(self.rect)
         painter.restore()
