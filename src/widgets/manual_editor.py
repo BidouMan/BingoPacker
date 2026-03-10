@@ -9,7 +9,7 @@ from ..logic_slice import SliceLogic
 from .asset_loader import AssetLoader
 
 class ManualEditor(QWidget):
-    slice_completed = Signal(str, list)
+    update_assets_data = Signal(str, list)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.slice_logic = SliceLogic() # 初始化逻辑类
@@ -215,9 +215,16 @@ class ManualEditor(QWidget):
         item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         self.frame_list.addItem(item)
         
+        
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
         self.sync_to_preview()
+
+        name = os.path.basename(file_path)
+        single_frame = [{"pixmap": self.current_pixmap, "rect": self.current_pixmap.rect()}]
+        
+        # --- 发送给 AssetTree ---
+        self.update_assets_data.emit(name, single_frame)
 
 
     def on_do_slice(self):
@@ -257,6 +264,9 @@ class ManualEditor(QWidget):
                 self.view.checker_item.set_rect(new_rect)
 
             self.update_frame_list_ui()
+
+            source_name = os.path.basename(self.current_source_path) if self.current_source_path else "Manual_Slice"
+            self.update_assets_data.emit(source_name, self.current_frames)
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0) # 内部会执行 fitInView
                     
@@ -338,7 +348,10 @@ class ManualEditor(QWidget):
         if frames:
             self.current_frames = frames
             self.update_frame_list_ui()
-            
+
+            name = os.path.basename(file_path)
+            self.update_assets_data.emit(name, self.current_frames)
+            print(f"DEBUG: ManualEditor 已发出数据更新信号: {name}")
             # 重新初始化棋盘格 (因为场景被清空了)
             first_pix = frames[0]["pixmap"]
             rect = QRectF(0, 0, first_pix.width(), first_pix.height())

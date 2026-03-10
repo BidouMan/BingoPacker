@@ -837,3 +837,26 @@ class AssetTree(QTreeWidget):
         edit_widget.setText(str(val))
         # 修正后刷新一下，确保预览同步
         self._update_item_states()
+    
+    def add_external_bundle(self, name, frames):
+        print(f"DEBUG: AssetTree 真正收到了信号，准备处理: {name}")
+        # 1. 创建顶级节点，必须传入 self (即当前的 QTreeWidget)
+        item = QTreeWidgetItem(self) 
+        item.setText(0, name)
+        item.setData(0, Qt.UserRole, frames) 
+        
+        total_count = len(frames)
+        
+        # 2. 调用你的子节点生成函数
+        # 注意：这里必须传入 item 作为第一个参数，表示它是 item 的子节点
+        child = self.add_editor_segment(item, "Sequence", 1, total_count, total_count)
+        
+        # --- 关键补充：确保树重新计算布局 ---
+        item.setExpanded(True)
+        self.setCurrentItem(child)
+        
+        # 强制界面刷新
+        self.viewport().update() 
+        
+        self.segment_selected.emit(name, "Sequence", 1, total_count)
+        print(f"DEBUG: AssetTree 已添加新项目: {name}")

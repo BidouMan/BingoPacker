@@ -10,6 +10,7 @@ from .logic_upload import UploadLogic
 from .logic_export import ExportLogic
 from .logic_slice import SliceLogic
 from .widgets.manual_editor import ManualEditor
+from .widgets.asset_tree import AssetTree
 
 class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic): 
     def __init__(self):
@@ -117,13 +118,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
         # --- 右侧预览区 (常驻) ---
         self.preview_panel = PreviewPanel()
-        # 强制显示并应用 One Dark 深色边框线
-        # self.preview_panel.setStyleSheet("""
-        #     PreviewPanel {
-        #         # background-color: red;
-        #         border-left: 1px solid #181a1f;
-        #     }
-        # """)
+
         self.preview_panel.setVisible(True)
         self.global_layout.addWidget(self.preview_panel)
 
@@ -165,12 +160,13 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_editor.clicked.connect(self.toggle_editor_view)
         self.btn_slice.clicked.connect(self.on_slice_clicked)
 
-
+        print("DEBUG: 正在连接信号...")
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
         self.btn_bgs.clicked.connect(self.on_export_bgs)    
         self.btn_sprite.clicked.connect(self.on_export_sprite3)
 
-        self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
+        self.editor_page.update_assets_data.connect(self.preview_panel.asset_tree.add_external_bundle)
+        self.preview_panel.asset_tree.segment_selected.connect(self.preview_panel.on_asset_segment_selected)
 
     # 供外部/PreviewPanel 调用的页面切换接口
     def toggle_editor_view(self):

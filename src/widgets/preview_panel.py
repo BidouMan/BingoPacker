@@ -565,3 +565,66 @@ class PreviewPanel(QFrame):
         self.play_timer.start(1000 // fps)
         
         self.update_play_button_icon(True)
+
+    def on_asset_segment_selected(self, asset_name, action_name, start, end):
+        """
+        [核心逻辑] 当 AssetTree 选中某个动作项时触发播放
+        asset_name: 资源名
+        action_name: 动作名 (如 "Sequence")
+        start: 开始帧 (从 1 开始)
+        end: 结束帧 (从 1 开始)
+        """
+        print(f"DEBUG: PreviewPanel 收到信号 -> {asset_name}, 范围: {start}-{end}")
+        
+        # 1. 获取发送者 (AssetTree)
+        tree = self.sender()
+        if not tree: 
+            return
+            
+        # 2. 获取当前选中的 Item
+        current_item = tree.currentItem()
+        
+        # 3. 寻找存储数据的节点 (如果是子节点，找它的 parent；如果是顶级节点，就是它自己)
+        target_item = None
+        if current_item:
+            target_item = current_item.parent() if current_item.parent() else current_item
+        else:
+            # 防御性编程：如果当前没有选中项，尝试根据名字搜寻顶级节点
+            items = tree.findItems(asset_name, Qt.MatchExactly)
+            if items: target_item = items[0]
+            
+        if not target_item:
+            print("DEBUG: 找不到携带数据的 TreeItem")
+            return
+
+        # 4. 提取存在 UserRole 里的内存数据 (frames 列表)
+        memory_data = target_item.data(0, Qt.UserRole)
+        
+        if memory_data:
+            # --- 情况 A: 内存模式 (裁切或 .bgs 导入) ---
+            print(f"DEBUG: 正在从内存播放 {len(memory_data)} 帧数据")
+            
+            # 停止当前播放，清理状态
+            self.play_timer.stop()
+            self.current_asset_path = None
+            self.frame_names = []
+            
+            # 提取 QPixmap 对象列表
+            pixmaps = [f["pixmap"] for f in memory_data]
+            self.current_frames_cache = pixmaps
+            
+            # 核心修复：将 1-Base 转换为 0-Base 索引
+            # 例如用户输入 1-10，我们要取索引 0-9
+            self.current_range = (start - 1, end - 1)
+            
+            # 重置播放指针到起始位置
+            self.current_frame_relative_idx = 0
+            
+            # 开始播放
+            self.play_timer.start(100) # 10FPS
+            self.auto_next_frame()
+        else:
+            # --- 情况 B: 磁盘模式 (旧有的 zip 逻辑) ---
+            print("DEBUG: 未发现内存数据，尝试走磁盘加载逻辑")
+            # 这里调用你原有的 load_animation_frames 逻辑
+            self.load_animation_frames(asset_name, start, end)
