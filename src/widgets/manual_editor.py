@@ -21,58 +21,70 @@ class ManualEditor(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        # --- 1. QSS 样式 (保持不动) ---
         self.setStyleSheet("""
-            QWidget { 
-                background-color: #282c34; 
-                color: #abb2bf; 
-                border: none; 
-            }
-            /* 左侧列表区 */
-            QListWidget {
-                background-color: #21252b;
-                border-right: 1px solid #181a1f;
-                outline: none;
-                padding: 5px;
-            }
-            QListWidget::item {
-                background-color: #2c313a;
-                border-radius: 4px;
-                margin-bottom: 4px;
-                padding: 5px;
-            }
-            QListWidget::item:selected {
-                background-color: #3e4451;
-                border: 1px solid #61afef;
-            }
-            /* 中央视图区域 */
-            QGraphicsView {
-                background-color: #181a1f; /* 类似代码编辑器的背景 */
-                border: none;
-            }
-            /* 按钮样式 */
-            QPushButton {
-                background-color: #353b45;
-                border: 1px solid #181a1f;
-                border-radius: 4px;
-                padding: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3e4451;
-            }
-            QPushButton:pressed {
-                background-color: #282c34;
-            }
+            QWidget { background-color: #282c34; color: #abb2bf; border: none; }
+            QListWidget { background-color: #21252b; border-right: 1px solid #181a1f; outline: none; padding: 5px; }
+            QListWidget::item { background-color: #2c313a; border-radius: 4px; margin-bottom: 4px; padding: 5px; }
+            QListWidget::item:selected { background-color: #3e4451; border: 1px solid #61afef; }
+            QGraphicsView { background-color: #181a1f; border: none; }
+            QPushButton { background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }
+            QPushButton:hover { background-color: #3e4451; }
+            QPushButton:pressed { background-color: #282c34; }
         """)
 
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # 主布局改为垂直布局：上工具栏，下内容区
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
 
-        # --- 左侧：资源列表 ---
+        # --- 2. 顶部：工具栏 (Toolbar) ---
+        self.toolbar = QFrame()
+        self.toolbar.setObjectName("Toolbar")
+        self.toolbar.setFixedHeight(40) # 固定高度让顶部更整洁
+        toolbar_layout = QHBoxLayout(self.toolbar)
+        toolbar_layout.setContentsMargins(5, 0, 5, 0)
+        toolbar_layout.setSpacing(4)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # 按钮初始化 (取消 setCheckable)
+        self.btn_new_file = QPushButton() 
+        self.btn_new_file.setToolTip("选取工具")
+        self.btn_new_file.setIcon(QIcon(os.path.join("assets", "icons", "btn_new_file.svg")))
+        self.btn_new_file.setIconSize(QSize(16, 16)) 
+
+        self.btn_pick = QPushButton() 
+        self.btn_pick.setToolTip("选取工具")
+        self.btn_pick.setIcon(QIcon(os.path.join("assets", "icons", "btn_pick.svg")))
+        self.btn_pick.setIconSize(QSize(16, 16)) 
+
+        self.btn_slice = QPushButton() 
+        self.btn_slice.setToolTip("裁切工具")
+        self.btn_slice.setIcon(QIcon(os.path.join("assets", "icons", "on_slice_clicked.svg")))
+        self.btn_slice.setIconSize(QSize(16, 16)) 
+
+        self.btn_clear = QPushButton("清空") 
+        self.btn_save = QPushButton()
+        self.btn_save.setToolTip("保存")
+        self.btn_save.setIcon(QIcon(os.path.join("assets", "icons", "btn_save.svg")))
+        self.btn_save.setIconSize(QSize(16, 16))
+
+        toolbar_layout.addWidget(self.btn_new_file)
+        toolbar_layout.addWidget(self.btn_save)
+        toolbar_layout.addWidget(self.btn_pick)
+        toolbar_layout.addWidget(self.btn_slice)
+        toolbar_layout.addWidget(self.btn_clear)
+        
+        
+        outer_layout.addWidget(self.toolbar)
+
+        # --- 3. 下部：内容区域 (Content Area) ---
+        content_container = QHBoxLayout()
+        content_container.setSpacing(0)
+
+        # 左侧：资源列表
         self.frame_list = QListWidget()
         self.frame_list.setFixedWidth(82)
-        
         self.frame_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.frame_list.setFlow(QListWidget.Flow.TopToBottom)
         self.frame_list.setMovement(QListWidget.Movement.Static)
@@ -82,60 +94,17 @@ class ManualEditor(QWidget):
         self.frame_list.setSpacing(2) 
         self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        main_layout.addWidget(self.frame_list)
-
-        # --- 右侧：工具栏 + 画布 ---
-        right_container = QVBoxLayout()
-        right_container.setSpacing(0) 
-
-        # 1. 工具栏 (完全保留你的原始布局)
-        self.toolbar = QFrame()
-        self.toolbar.setObjectName("Toolbar")
-        toolbar_layout = QHBoxLayout(self.toolbar)
-        toolbar_layout.setContentsMargins(5, 0, 5, 0)
-        toolbar_layout.setSpacing(4)
-        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-
-        self.tool_group = QButtonGroup(self)
-        self.tool_group.setExclusive(True) 
-
-        self.btn_pick = QPushButton() 
-        self.btn_pick.setCheckable(True) 
-        self.btn_pick.setToolTip("选取工具")
-        icon_path = os.path.join("assets", "icons", "btn_pick.svg")
-        self.btn_pick.setIcon(QIcon(icon_path))
-        self.btn_pick.setIconSize(QSize(16, 16)) 
-
-        self.btn_slice = QPushButton() 
-        self.btn_slice.setCheckable(True)
-        icon_path = os.path.join("assets", "icons", "on_slice_clicked.svg")
-        self.btn_slice.setIcon(QIcon(icon_path))
-        self.btn_slice.setIconSize(QSize(16, 16)) 
-
-        self.btn_clear = QPushButton("清空") 
-        self.btn_save = QPushButton()
-        icon_path = os.path.join("assets", "icons", "btn_save.svg")
-        self.btn_save.setIcon(QIcon(icon_path))
-        self.btn_save.setIconSize(QSize(16, 16))
-
-        self.tool_group.addButton(self.btn_pick)
-        self.tool_group.addButton(self.btn_slice)
-
-        toolbar_layout.addWidget(self.btn_pick)
-        toolbar_layout.addWidget(self.btn_slice)
-        toolbar_layout.addWidget(self.btn_clear)
-        toolbar_layout.addWidget(self.btn_save)
-
-        # 2. 画布区
-        self.scene = QGraphicsScene()
-        self.view = ScalableView(self.scene) # 传入 self.scene
-        self.view.setStyleSheet("border-top-left-radius: 0px; border-top-right-radius: 0px;")
-
-        right_container.addWidget(self.toolbar)
-        right_container.addWidget(self.view)
         
-        main_layout.addLayout(right_container)
+        # 右侧：画布区
+        self.scene = QGraphicsScene()
+        self.view = ScalableView(self.scene)
+        
+        content_container.addWidget(self.frame_list)
+        content_container.addWidget(self.view)
+        
+        outer_layout.addLayout(content_container)
 
+        # --- 4. 后续初始化 ---
         self.selection_manager = SelectionManager(self.scene)
         self.set_connect()
 

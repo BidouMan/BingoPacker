@@ -77,8 +77,8 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.main_container = QWidget()
         self.main_container.setFixedWidth(760)
         main_layout = QVBoxLayout(self.main_container)
-        main_layout.setContentsMargins(25, 20, 25, 25)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
 
         # 标题采用 One Dark 经典的软蓝色
         # header = QLabel("BINGO SPRITE PACKER")
@@ -136,12 +136,12 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_clear = self.make_btn(" 清空", "#313244", "#89b4fa", "clear_all")
         self.btn_editor = self.make_btn(' 编辑',"#313244", "#89b4fa", "btn_editor")
         self.btn_slice = self.make_btn(" 裁切", "#313244", "#89b4fa", "on_slice_clicked")
-        self.btn_preview = self.make_btn(" 预览", "#313244", "#89b4fa", "toggle_side_preview")
+
         
         self.btn_bgs = self.make_btn("导出 .bgs", "#45b573", "#58ce87")
         self.btn_sprite = self.make_btn("导出 .sprite3", "#d9793d", "#e68a4d")
 
-        for b in [self.btn_upload, self.btn_clear, self.btn_editor,self.btn_slice, self.btn_preview]:
+        for b in [self.btn_upload, self.btn_clear, self.btn_editor,self.btn_slice]:
             btn_layout.addWidget(b)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_bgs)
@@ -163,9 +163,8 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
         self.btn_editor.clicked.connect(self.toggle_editor_view)
-        # self.btn_editor.clicked.connect(self.toggle_side_preview)
         self.btn_slice.clicked.connect(self.on_slice_clicked)
-        # self.btn_preview.clicked.connect(self.toggle_side_preview)
+
 
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
         self.btn_bgs.clicked.connect(self.on_export_bgs)    
@@ -179,24 +178,6 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.left_stack.setCurrentIndex(new_idx)
         return new_idx == 1
 
-    # def toggle_side_preview(self):
-    #     """侧边栏动画 - 严格复刻原始代码"""
-    #     is_expanded = self.preview_panel.width() > 0
-    #     target_p = 0 if is_expanded else 280
-    #     target_w = 760 if is_expanded else 760 + 280
-
-    #     self.anim_p = QPropertyAnimation(self.preview_panel, b"minimumWidth")
-    #     self.anim_p_max = QPropertyAnimation(self.preview_panel, b"maximumWidth")
-    #     self.anim_w = QPropertyAnimation(self, b"minimumWidth")
-    #     self.anim_w_max = QPropertyAnimation(self, b"maximumWidth")
-
-    #     for a in [self.anim_p, self.anim_p_max, self.anim_w, self.anim_w_max]:
-    #         a.setDuration(300)
-    #         a.setEasingCurve(QEasingCurve.OutCubic)
-    #         a.setEndValue(target_w if a.targetObject() == self else target_p)
-
-    #     self.anim_p.start(); self.anim_p_max.start()
-    #     self.anim_w.start(); self.anim_w_max.start()
     
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
