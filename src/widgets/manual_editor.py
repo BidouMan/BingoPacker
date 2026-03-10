@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
                                QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel,
-                               QPushButton, QFrame,QGraphicsItem, QAbstractItemView)
+                               QPushButton, QFrame,QGraphicsItem, QButtonGroup)
 from PySide6.QtCore import Qt, QRectF, QPoint, QSize,Signal
 from PySide6.QtGui import QPixmap, QWheelEvent, QPainter, QMouseEvent, QIcon, QDragEnterEvent, QDropEvent,QBrush,QColor,QTransform
 from .selection_manager import SelectionManager
@@ -64,28 +64,42 @@ class ManualEditor(QWidget):
         toolbar_layout.setContentsMargins(5, 0, 5, 0)
         toolbar_layout.setSpacing(4)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        
 
-        # 按钮初始化 (取消 setCheckable)
+        # 按钮初始化 
+        
+        self.tool_group = QButtonGroup(self)
+        self.tool_group.setExclusive(True)
+
         self.btn_new_file = QPushButton() 
         self.btn_new_file.setToolTip("选取工具")
         self.btn_new_file.setIcon(QIcon(os.path.join("assets", "icons", "btn_new_file.svg")))
         self.btn_new_file.setIconSize(QSize(16, 16)) 
-
-        self.btn_pick = QPushButton() 
-        self.btn_pick.setToolTip("选取工具")
-        self.btn_pick.setIcon(QIcon(os.path.join("assets", "icons", "btn_pick.svg")))
-        self.btn_pick.setIconSize(QSize(16, 16)) 
-
-        self.btn_slice = QPushButton() 
-        self.btn_slice.setToolTip("裁切工具")
-        self.btn_slice.setIcon(QIcon(os.path.join("assets", "icons", "on_slice_clicked.svg")))
-        self.btn_slice.setIconSize(QSize(16, 16)) 
 
         self.btn_clear = QPushButton("清空") 
         self.btn_save = QPushButton()
         self.btn_save.setToolTip("保存")
         self.btn_save.setIcon(QIcon(os.path.join("assets", "icons", "btn_save.svg")))
         self.btn_save.setIconSize(QSize(16, 16))
+
+        self.btn_pick = QPushButton() 
+        self.btn_pick.setToolTip("选取工具")
+        self.btn_pick.setIcon(QIcon(os.path.join("assets", "icons", "btn_pick.svg")))
+        self.btn_pick.setIconSize(QSize(16, 16)) 
+        self.btn_pick.setCheckable(True)
+
+        self.btn_slice = QPushButton() 
+        self.btn_slice.setToolTip("裁切工具")
+        self.btn_slice.setIcon(QIcon(os.path.join("assets", "icons", "on_slice_clicked.svg")))
+        self.btn_slice.setIconSize(QSize(16, 16)) 
+        self.btn_slice.setCheckable(True)
+
+        # --------- 预计添加功能 -------------
+        # 修改画布大小/魔棒工具/
+
+        
+        self.tool_group.addButton(self.btn_pick)
+        self.tool_group.addButton(self.btn_slice)
 
         toolbar_layout.addWidget(self.btn_new_file)
         toolbar_layout.addWidget(self.btn_save)
@@ -160,81 +174,54 @@ class ManualEditor(QWidget):
             main_win.add_log("-> 保存完成", "#a6e3a1")
             main_win.add_log(f"-> 文件夹:  {os.path.basename(save_dir)}", "#89b4fa")
         
-
     def display_image(self, file_path):
-        """显示导入的精灵图并更新左侧列表 - 补全定义版"""
         if not os.path.exists(file_path): return
-        
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
 
         self.current_source_path = file_path
-        # --- 1. 严格清理阶段 ---
-        self.frame_list.blockSignals(True) # 阻塞信号防止连锁反应
+        self.frame_list.blockSignals(True)
         
-        if self.preview_item:
-            try: self.scene.removeItem(self.preview_item)
-            except: pass
-            self.preview_item = None
-
         self.scene.clear()
         self.frame_list.clear()
         self.current_frames = []
-        
-        if hasattr(self, 'selection_manager'):
-            self.selection_manager.clear_selections()
 
-
-        # --- 2. 画布加载 ---
-        # 1. 重新添加棋盘格 (因为 clear 会把所有 item 删掉)
-        self.checker_item = CheckerboardItem(QRectF(0, 0, pixmap.width(), pixmap.height()))
-        self.scene.addItem(self.checker_item)
-
+        # 创建棋盘格
+        self.view.checker_item = CheckerboardItem(QRectF(0, 0, pixmap.width(), pixmap.height()))
+        self.scene.addItem(self.view.checker_item)
 
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
+        # --- 核心修改：使用 FastTransformation 保证像素不模糊 ---
         self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation) 
         self.scene.addItem(self.pixmap_item)
-        # self.scene.setSceneRect(QRectF(pixmap.rect()))
-        # 确保图片在棋盘格上面
         self.pixmap_item.setZValue(0)
         
-        # 设置场景范围
         self.scene.setSceneRect(QRectF(0, 0, pixmap.width(), pixmap.height()))
-
-
         self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
-        self.view.centerOn(self.pixmap_item)
 
-        # --- 3. 补全 canvas 定义并生成缩略图 ---
+        # 缩略图逻辑：列表里的预览可以保留平滑，否则太小的像素看不清
         icon_area = 45 
-        # 必须先定义 canvas 才能传给 QPainter
         canvas = QPixmap(icon_area, icon_area) 
         canvas.fill(Qt.GlobalColor.transparent)
-        
-        thumb = pixmap.scaled(icon_area, icon_area, 
-                             Qt.AspectRatioMode.KeepAspectRatio, 
-                             Qt.TransformationMode.SmoothTransformation)
-        
+        thumb = pixmap.scaled(icon_area, icon_area, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         painter = QPainter(canvas)
-        # 居中绘制缩略图
         painter.drawPixmap((icon_area - thumb.width()) // 2, (icon_area - thumb.height()) // 2, thumb)
         painter.end()
         
         item = QListWidgetItem()
-        item.setIcon(QIcon(canvas)) # 现在 canvas 已定义
+        item.setIcon(QIcon(canvas)) 
         item.setText(os.path.basename(file_path))
         item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         self.frame_list.addItem(item)
         
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
-
         self.sync_to_preview()
 
 
     def on_do_slice(self):
         bg_item = next((i for i in self.scene.items() 
-                       if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+                    if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
         if not bg_item: return
 
         rects = self.selection_manager.get_sorted_selections()
@@ -244,22 +231,34 @@ class ManualEditor(QWidget):
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
         if self.current_frames:
-            bg_item.setVisible(False) 
-            self.selection_manager.clear_selections() 
-            self.selection_manager.set_active(False) 
-            self.btn_pick.setChecked(False) 
-            self.update_frame_list_ui() 
-            self.frame_list.setCurrentRow(0)            
+            # --- 彻底清理旧状态 ---
+            if hasattr(self, 'preview_item') and self.preview_item:
+                self.scene.removeItem(self.preview_item)
+                self.preview_item = None
+            
+            # 隐藏底图
+            bg_item = next((i for i in self.scene.items() if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+            if bg_item: bg_item.setVisible(False)
 
-            self.sync_to_preview() # <--- 在这里调用
+            self.selection_manager.clear_selections()
+            self.selection_manager.set_active(False)
 
-            # --- 核心修复：在这里调用 AssetTree ---
-            # 发射信号 (假设你已经定义了 slice_completed = Signal(str, list))
-            source_name = os.path.basename(self.current_source_path or "Unknown")
-            # 尝试直接找 parent 的信号发射，或者简单点：
-            if hasattr(self, "slice_completed"):
-                self.slice_completed.emit(source_name, self.current_frames)
+            # --- 强制刷新场景和棋盘格 ---
+            first_pix = self.current_frames[0]["pixmap"]
+            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            
+            # 1. 更新场景尺寸
+            self.scene.setSceneRect(new_rect)
+            
+            # 2. 更新棋盘格：先移除再添加或重设，确保 ID 更新
+            if hasattr(self.view, 'checker_item'):
+                # 这种做法比 scene.clear() 更安全，因为它只动棋盘格
+                self.view.checker_item.set_rect(new_rect)
 
+            self.update_frame_list_ui()
+            self.frame_list.setCurrentRow(0)
+            self.switch_frame_preview(0) # 内部会执行 fitInView
+                    
     def sync_to_preview(self):
         """裁切完成后，只推送数据"""
         main_win = self.window()
@@ -276,7 +275,7 @@ class ManualEditor(QWidget):
             item = QListWidgetItem(f"帧 {i:02d}")
             item.setSizeHint(QSize(78, 80)) 
             icon_pix = pix.scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio, 
-                                 Qt.TransformationMode.SmoothTransformation)
+                                Qt.TransformationMode.SmoothTransformation)
             item.setIcon(QIcon(icon_pix))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.frame_list.addItem(item)
@@ -284,28 +283,26 @@ class ManualEditor(QWidget):
     def switch_frame_preview(self, index):
         if index < 0 or index >= len(self.current_frames): return
         pix = self.current_frames[index]["pixmap"]
-        try:
-            if not hasattr(self, 'preview_item') or self.preview_item is None:
-                self.preview_item = QGraphicsPixmapItem()
-                self.scene.addItem(self.preview_item)
-            self.preview_item.setPixmap(pix)
-            self.preview_item.setVisible(True)
-            self.preview_item.setZValue(100)
-            scene_rect = self.scene.sceneRect()
-            self.preview_item.setPos(
-                scene_rect.center().x() - pix.width() / 2,
-                scene_rect.center().y() - pix.height() / 2
-            )
-        except (RuntimeError, AttributeError):
-            self.preview_item = QGraphicsPixmapItem(pix)
+        new_rect = QRectF(0, 0, pix.width(), pix.height())
+
+        self.scene.setSceneRect(new_rect)
+
+        if hasattr(self.view, 'checker_item') and self.view.checker_item:
+            self.view.checker_item.set_rect(new_rect)
+
+        if self.preview_item is None:
+            self.preview_item = QGraphicsPixmapItem()
             self.scene.addItem(self.preview_item)
         
-        main_win = self.window()
-        if hasattr(main_win, 'preview_panel'):
-            panel = main_win.preview_panel
-            panel.play_timer.stop()
-            panel.current_frame_relative_idx = index
-            panel.update_preview() # 这里只会执行上面改好的简版渲染
+        self.preview_item.setPixmap(pix)
+        self.preview_item.setPos(0, 0)
+        self.preview_item.setVisible(True)
+        self.preview_item.setZValue(1)
+        # --- 核心修改：预览图层也使用 FastTransformation ---
+        self.preview_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+
+        self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self.sync_to_preview()
 
     # 为了让 ScalableView 的 drop 生效，父级也需要接受 dragEnter
     def dragEnterEvent(self, event):
@@ -323,7 +320,7 @@ class ScalableView(QGraphicsView):
         
         # --- 将原本在 ManualEditor 的设置挪到这里 ---
         self.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setBackgroundBrush(Qt.GlobalColor.transparent)
@@ -331,8 +328,7 @@ class ScalableView(QGraphicsView):
         self.setBackgroundBrush(QColor(30, 33, 39)) # 设置默认的 PS 深灰色背景
         
         # 初始化棋盘格管理
-        self.checker_item = CheckerboardItem()
-        self.scene().addItem(self.checker_item)
+        self.checker_item = None
         # 开启画布级别的拖拽接收
         self.setAcceptDrops(True)
         
@@ -452,74 +448,58 @@ class CheckerboardItem(QGraphicsItem):
     def __init__(self, rect=QRectF()):
         super().__init__()
         self.rect = rect
-        self.setZValue(-1) 
-        self.color1 = QColor(110, 110, 110)
-        self.color2 = QColor(100, 100, 100)
+        self.color1 = QColor(50, 50, 50)
+        self.color2 = QColor(60, 60, 60)
+        self.setZValue(-100)
+        self._cached_pixmap = None
+        self._last_side = -1
 
     def set_rect(self, rect):
-        self.prepareGeometryChange()
+        self.prepareGeometryChange() # 通知场景几何改变，防止旧残影
         self.rect = rect
+        self._cached_pixmap = None # 重置缓存
         self.update()
 
     def boundingRect(self):
-        return self.rect
+        return self.rect if not self.rect.isNull() else QRectF(0, 0, 1000, 1000)
 
     def paint(self, painter, option, widget):
-        if self.rect.isEmpty():
-            return
+        if self.rect.isEmpty(): return
 
-        # 1. 获取当前缩放比例
-        current_transform = painter.worldTransform()
-        scale = current_transform.m11()
-        
-        # 2. 动态计算逻辑格子大小
-        import math
-        target_logic_side = 16.0 / scale
-        if target_logic_side < 1.0:
-            logic_side = 1.0 
-        else:
-            exponent = math.ceil(math.log2(target_logic_side))
-            logic_side = float(2 ** exponent)
-
-        # 3. 计算物理像素下的格子大小
-        phys_side = math.ceil(logic_side * scale)
-        
         painter.save()
         painter.setClipRect(self.rect)
         
-        # 4. 创建物理纹理
-        tile = QPixmap(phys_side * 2, phys_side * 2)
-        tile.fill(self.color2)
-        tp = QPainter(tile)
-        tp.fillRect(0, 0, phys_side, phys_side, self.color1)
-        tp.fillRect(phys_side, phys_side, phys_side, phys_side, self.color1)
-        tp.end()
-
-        # 5. 【修复点】物理坐标映射与同步
-        # 获取图片左上角在视图（屏幕）中的物理像素位置
-        origin_in_view = current_transform.map(self.rect.topLeft())
+        # 强制使用当前缩放的整数倍，避免亚像素渲染
+        dpr = widget.devicePixelRatioF() if widget else 1.0
+        scale = painter.worldTransform().m11()
         
-        # 计算图片在视图中的物理尺寸
-        view_w = self.rect.width() * scale
-        view_h = self.rect.height() * scale
-
-        # 暂时重置 painter 变换，进入物理坐标系绘图
-        painter.setWorldTransform(QTransform())
+        # 让格子大小固定为 8, 16, 32 这种适合像素画的尺寸，或根据缩放向下取整
+        side = max(2, int(16 / scale))
         
-        # 构建物理矩形
-        view_rect = QRectF(origin_in_view.x(), origin_in_view.y(), view_w, view_h)
+        if self._cached_pixmap is None or self._last_side != side:
+            self._last_side = side
+            # 物理像素对齐
+            phys_side = int(side * dpr)
+            tile = QPixmap(phys_side * 2, phys_side * 2)
+            tile.setDevicePixelRatio(dpr)
+            tile.fill(self.color2)
+            
+            tp = QPainter(tile)
+            # 这里的逻辑绘图要确保是整数
+            tp.fillRect(0, 0, side, side, self.color1)
+            tp.fillRect(side, side, side, side, self.color1)
+            tp.end()
+            self._cached_pixmap = tile
 
-        # 设置刷子并对齐
-        brush = QBrush(tile)
-        
-        # 这里的关键：让刷子的起点偏移量等于图片在屏幕上的物理坐标
-        # 这样无论你怎么拖动，刷子的纹理原点会始终跟着 origin_in_view 走
-        brush_transform = QTransform()
-        brush_transform.translate(origin_in_view.x(), origin_in_view.y())
-        brush.setTransform(brush_transform)
+        brush = QBrush(self._cached_pixmap)
+        brush_tx = QTransform()
+        # 关键：坐标必须取整，防止 0.5 像素偏移导致的模糊
+        brush_tx.translate(int(self.rect.x()), int(self.rect.y()))
+        brush.setTransform(brush_tx)
 
         painter.setBrush(brush)
         painter.setPen(Qt.NoPen)
-        painter.drawRect(view_rect)
-        
+        # 像素风格严禁开启抗锯齿
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.drawRect(self.rect)
         painter.restore()
