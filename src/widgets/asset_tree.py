@@ -1,7 +1,8 @@
 import os
 from PySide6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QPushButton, 
                                QHBoxLayout, QWidget, QLineEdit, QLabel, QStackedWidget, QAbstractItemView)
-from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtCore import Qt, Signal, QEvent,QSize
+from PySide6.QtGui import QIcon
 
 class AssetTree(QTreeWidget):
     segment_selected = Signal(str, str, int, int)
@@ -25,90 +26,32 @@ class AssetTree(QTreeWidget):
 
         self.setStyleSheet("""
             QTreeWidget { 
-                background-color: #181825; 
-                border: none; 
-                border-radius: 12px; 
-                outline: none;
+                background-color: #21252b; 
+                border: 1px solid #181a1f;
                 padding: 0px; 
+                outline: none;
             }
-            
             QTreeWidget QWidget { background: transparent; }
-
-            QTreeWidget::item { 
-                background: transparent;
-                border: none;
-                height: 40px;
-            }
+            QTreeWidget::item { background: transparent; border: none; height: 32px; }
             QTreeWidget::item:selected { background: transparent; }
 
-            /* --- 父资源行样式 --- */
-            QWidget#ParentContainer {
-                background-color: transparent;
-                border-bottom: 1px solid #313244; /* 底部分割线 */
-            }
-            QWidget#ParentContainer[selected="true"] {
-                background-color: #2d3f5d;
-                border-bottom: 1px solid #2d3f5d; /* 选中时隐藏线 */
-            }
+            QWidget#ParentContainer { border-bottom: 1px solid #181a1f; }
+            QWidget#ParentContainer[selected="true"] { background-color: #2c313a; }
+            QWidget#ChildContainer { background-color: rgba(0, 0, 0, 0.1); }
+            QWidget#ChildContainer[selected="true"] { background-color: #3e4451; }
 
-            /* --- 子片段行样式 --- */
-            QWidget#ChildContainer {
-                background-color: rgba(255, 255, 255, 0.03); /* 极微弱的白色半透明，产生层级感 */
-                margin: 2px 8px; /* 四周留白，看起来像独立的胶囊块 */
-                border-radius: 6px; 
-            }
-            QWidget#ChildContainer[selected="true"] {
-                background-color: #3e4451; 
-            }
-
-            /* 顶部圆角逻辑：只针对视觉第一行 */
-            QWidget#ParentContainer[position="first"][selected="true"] {
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }
-
-            /* 底部圆角逻辑：只有超过6行且到底时触发 */
-            QWidget#ParentContainer[position="last"][selected="true"],
-            QWidget#ChildContainer[position="last"][selected="true"] {
-                border-bottom-left-radius: 10px;
-                border-bottom-right-radius: 10px;
-            }
-
-            /* 文字与输入框样式 */
-            QLabel#NameLabel { background: transparent; color: #cdd6f4; font-size: 13px; }
-            QWidget[selected="true"] QLabel#NameLabel { color: #89b4fa; }
+            QLabel#NameLabel { color: #abb2bf; font-size: 13px; }
+            QWidget[selected="true"] QLabel#NameLabel { color: #61afef; }
             
-            QLineEdit#NameEditor { 
-                background-color: #0f0f17; 
-                border: none;
-                border-radius: 4px; 
-                color: #89b4fa; 
-                padding: 0px 6px;
-                selection-background-color: rgba(137, 180, 250, 60);
-                selection-color:white            
-            }
-
-            /* 数字输入框样式 */
-            QLineEdit#DigitEdit {
-                background: #11111b; 
-                border: 1px solid #313244; 
-                color: #fab387; 
-                border-radius: 4px; 
-                padding: 0px;
-                font-size: 11px;
-            }
-                           QPushButton#AssetActionBtn {
-                background: #313244;
-                color: #a6adc8;
-                border: none;
+            /* 动作按钮样式 */
+            QPushButton#AssetActionBtn {
+                background-color: #353b45;
+                color: #abb2bf;
+                border: 1px solid #181a1f;
                 border-radius: 4px;
-                font-weight: bold;
                 font-size: 10px;
             }
-            QPushButton#AssetActionBtn:hover { 
-                background: #45475a; 
-                color: #f5e0dc; /* 悬停时文字稍微亮一点 */
-            }
+            QPushButton#AssetActionBtn:hover { border: 1px solid #61afef; color: #61afef; }
         """)
 
         # 监听交互
@@ -224,7 +167,7 @@ class AssetTree(QTreeWidget):
         root.setData(0, Qt.UserRole, path) 
         
         # UI 样式处理
-        dot_color = "#a6e3a1" if ext == ".sprite3" else "#cba6f7"
+        dot_color = "#ef8a5b" if ext == ".sprite3" else "#14B977"
         if os.path.isdir(path): dot_color = "#89b4fa"
         
         container = QWidget()
@@ -236,13 +179,23 @@ class AssetTree(QTreeWidget):
         ns_widget = self._create_name_widget(name, 140)
 
         # 按钮构建
-        btn_s = QPushButton("S"); btn_s.setObjectName("AssetActionBtn")
-        btn_s.setFixedSize(22, 22); btn_s.setCursor(Qt.PointingHandCursor)
+        btn_s = QPushButton()
+        btn_s.setObjectName("AssetActionBtn")
+        icon_path = os.path.join('assets','icons','btn_s.svg')
+        btn_s.setIcon(QIcon(icon_path))
+        btn_s.setIconSize(QSize(16, 16))
+        btn_s.setFixedSize(22, 22)
+        btn_s.setCursor(Qt.PointingHandCursor)
         btn_s.clicked.connect(lambda: self._sync_asset_to_disk(root, ns_widget))
         
-        btn_add = QPushButton("+"); btn_add.setObjectName("AssetActionBtn")
-        btn_add.setFixedSize(22, 22); btn_add.setCursor(Qt.PointingHandCursor)
-        btn_add.clicked.connect(self.on_add_new_clicked)
+        btn_add = QPushButton()
+        btn_add.setObjectName("AssetActionBtn")
+        icon_path = os.path.join('assets','icons','btn_add.svg')
+        btn_add.setIcon(QIcon(icon_path))
+        btn_add.setIconSize(QSize(16, 16))
+        btn_add.setFixedSize(22, 22)
+        btn_add.setCursor(Qt.PointingHandCursor)
+        btn_add.clicked.connect(lambda checked=False, r=root: self.on_add_new_clicked(r))
         
         layout.addWidget(dot); layout.addWidget(ns_widget); layout.addStretch()
         layout.addWidget(btn_s); layout.addWidget(btn_add)
@@ -427,64 +380,62 @@ class AssetTree(QTreeWidget):
     
 
     def _sync_and_validate_row(self, child, root, container):
-        # 1. 获取 UI 组件
+        # 1. 获取 UI 组件 (保持不变)
         stack = container.findChild(QStackedWidget)
         s_edit = container.findChild(QLineEdit, "s_edit")
         e_edit = container.findChild(QLineEdit, "e_edit")
         if not stack or not s_edit or not e_edit: return
 
-        # 2. 获取真实最大索引 (关键：确保 add_asset 时存了 data)
+        # 2. 获取真实最大索引
         asset_info = root.data(0, Qt.UserRole + 1)
-        # 防御性编程：如果真的拿不到数据，暂时设一个极大值，而不是设为 1 导致所有输入被卡死
         max_limit = 999 
         if isinstance(asset_info, dict) and "count" in asset_info:
             max_limit = int(asset_info["count"])
 
-        # 3. 处理名字 (逻辑不变)
+        # 3. 处理名字 (保持不变)
         name_edit = stack.widget(1)
         unique_name = self.get_unique_name(root, name_edit.text().strip(), exclude_item=child)
         name_edit.setText(unique_name)
         stack.widget(0).setText(unique_name)
 
-        # 4. 帧数逻辑：严格区分 Start 和 End
+        # 4. 帧数逻辑：修改 s_val 的修正行为
         try:
             s_val = int(s_edit.text()) if s_edit.text() else 1
             e_val = int(e_edit.text()) if e_edit.text() else max_limit
 
             # --- A. 起始帧 (Start) 处理 ---
-            # 如果起始帧小于 1，修正为 1
             if s_val < 1: 
                 s_val = 1
-            # 如果起始帧大于资源总数，修正为 1 (乱输归位)
+            # 【修改点】：如果起始帧乱输（大于总数），修正为 max_limit
             if s_val > max_limit:
-                s_val = 1
+                s_val = max_limit
             
-            # --- B. 结束帧 (End) 处理 ---
-            # 核心需求：如果结束帧大于最大索引，修正为最大索引
+            # --- B. 结束帧 (End) 处理 (保持你认为正确的逻辑) ---
             if e_val > max_limit:
                 e_val = max_limit
-            # 如果结束帧小于 1，修正为最大索引 (或者 1，根据你喜好)
             if e_val < 1:
                 e_val = max_limit
 
-            # --- C. 逻辑保护：Start 不能超过当前的 End ---
+            # --- C. 逻辑保护：防止起始帧超过结束帧 ---
+            # 如果起始帧由于上面的修正变成了 max_limit，而结束帧没那么大，
+            # 那么起始帧应该等于结束帧
             if s_val > e_val:
                 s_val = e_val
 
-            # 5. 【重要】将修正后的值强制回写到 UI
+            # 5. 回写 UI (保持不变)
             s_edit.setText(str(s_val))
             e_edit.setText(str(e_val))
 
-            # 6. 更新内存并同步预览
+            # 6. 同步数据
             child.setData(0, Qt.UserRole + 1, (unique_name, s_val, e_val))
             self.segment_selected.emit(root.data(0, Qt.UserRole), unique_name, s_val, e_val)
 
         except ValueError:
-            # 输入非数字时的兜底
-            s_edit.setText("1")
+            # 输入非数字时的兜底：全部修正为最大帧
+            s_edit.setText(str(max_limit))
             e_edit.setText(str(max_limit))
-            child.setData(0, Qt.UserRole + 1, (unique_name, 1, max_limit))
-            self.segment_selected.emit(root.data(0, Qt.UserRole), unique_name, 1, max_limit)
+            child.setData(0, Qt.UserRole + 1, (unique_name, max_limit, max_limit))
+            self.segment_selected.emit(root.data(0, Qt.UserRole), unique_name, max_limit, max_limit)
 
     def _process_internal_files(self, asset_path, asset_name, segments):
         """深度同步：支持SVG、帧数保护，且片段内序号强制从01开始"""
@@ -575,12 +526,11 @@ class AssetTree(QTreeWidget):
         self.verticalScrollBar().setValue(0)
     
     def on_add_new_clicked(self,root):
-        root = self.topLevelItem(0) # 简单处理：获取第一个资源根节点
-    
+        if not root:
+            return
+
         new_item = self.add_segment(root, "动画", 1, 10)
         self.setCurrentItem(new_item) 
-        
-        # 修复：将 self.on_item_clicked 替换为 emit_segment_signal
         self.emit_segment_signal(new_item)
     
     def update_data_and_preview(self):
@@ -675,8 +625,8 @@ class AssetTree(QTreeWidget):
         """
         专门接收编辑器裁切后的数据
         """
-        
-        root_name = f"Sliced: {source_name}"
+        clean_name = os.path.splitext(source_name)[0]
+        root_name = f"{clean_name}"
         frame_count = len(frames_data)
         
         # 1. 创建根节点逻辑...
@@ -690,6 +640,8 @@ class AssetTree(QTreeWidget):
 
         # 2. 构建 UI (圆点、改名组件、S按钮、+按钮)
         container = QWidget()
+        container.setObjectName("ParentContainer")  # 1. 必须命名，才能匹配 QSS 中的 #ParentContainer
+        container.setProperty("selected", "false")   # 2. 初始化属性
         layout = QHBoxLayout(container)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(4)
@@ -699,14 +651,20 @@ class AssetTree(QTreeWidget):
         
         ns_widget = self._create_name_widget(root_name, 140)
         
-        btn_s = QPushButton("S")
+        btn_s = QPushButton()
         btn_s.setObjectName("AssetActionBtn")
+        icon_path = os.path.join('assets','icons','btn_s.svg')
+        btn_s.setIcon(QIcon(icon_path))
+        btn_s.setIconSize(QSize(16, 16))
         btn_s.setFixedSize(22, 22)
         
-        btn_add = QPushButton("+")
+        btn_add = QPushButton()
         btn_add.setObjectName("AssetActionBtn")
+        icon_path = os.path.join('assets','icons','btn_add.svg')
+        btn_add.setIcon(QIcon(icon_path))
+        btn_add.setIconSize(QSize(16, 16))
         btn_add.setFixedSize(22, 22)
-        btn_add.clicked.connect(lambda: self.add_segment(root, "New Segment", 1, frame_count))
+        btn_add.clicked.connect(lambda _, r=root, c=frame_count: self.add_editor_segment(r, "动画", 1, c, c))
         
         layout.addWidget(dot)
         layout.addWidget(ns_widget)
@@ -716,8 +674,12 @@ class AssetTree(QTreeWidget):
         
         self.setItemWidget(root, 0, container)
 
+        # 默认选中这个新创建的根节点
+        self.setCurrentItem(root) 
+        self._update_item_states() # 立即刷新一次颜色
+
         # 3. 默认添加片段
-        self.add_segment(root, "Full_Animation", 1, frame_count)
+        self.add_editor_segment(root, "动画", 1, frame_count, frame_count)
         
         root.setExpanded(True)
         self._update_item_states()
@@ -758,9 +720,7 @@ class AssetTree(QTreeWidget):
             end_idx = min(len(full_pixmaps), end)
             
             segment_pixmaps = full_pixmaps[start_idx : end_idx]
-            
-            print(f"DEBUG: 点击了 {item}, 实时读取范围: {start}-{end}, 实际截取帧数: {len(segment_pixmaps)}")
-            
+                        
             # 推送到预览
             main_win = self.window()
             if hasattr(main_win, "preview_panel"):
@@ -779,3 +739,101 @@ class AssetTree(QTreeWidget):
         
         # 如果没匹配到（可能是根节点），默认返回 1-1
         return 1, 1
+
+
+    def add_editor_segment(self, parent_item, base_name, start, end, max_frames):
+        # --- 1. 重名检查 (保持不变) ---
+        existing_names = []
+        for i in range(parent_item.childCount()):
+            child_old = parent_item.child(i)
+            widget = self.itemWidget(child_old, 0)
+            if widget:
+                label = widget.findChild(QLabel, "NameLabel")
+                if label: existing_names.append(label.text())
+        
+        final_name = base_name
+        counter = 1
+        while final_name in existing_names:
+            final_name = f"{base_name}_{counter}"
+            counter += 1
+
+        # --- 2. 创建节点 ---
+        child = QTreeWidgetItem(parent_item)
+        child.setData(0, Qt.UserRole, "SEGMENT")
+        child.setData(0, Qt.UserRole + 3, (start, end))
+
+        container = QWidget()
+        container.setObjectName("ChildContainer")
+        container.setProperty("selected", "false")
+        
+        layout = QHBoxLayout(container)
+        # 关键点：与 add_segment 保持完全一致的 12px 边距
+        layout.setContentsMargins(12, 0, 10, 0) 
+        layout.setSpacing(6)
+
+        # 样式定义 (完全复刻 .bgs 里的样式)
+        digit_qss = """
+            QLineEdit {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 4px;
+                padding: 0px;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                background-color: #45475a;
+            }
+        """
+
+        # 名称标签 (对齐 100 宽度)
+        ns_widget = self._create_name_widget(final_name, 100)
+        
+        # 起始帧
+        s_edit = QLineEdit(str(start))
+        s_edit.setObjectName("s_edit")
+        s_edit.setFixedSize(35, 22)
+        s_edit.setAlignment(Qt.AlignCenter)
+        s_edit.setFrame(False) # 必须设为 False
+        s_edit.setStyleSheet(digit_qss)
+        s_edit.editingFinished.connect(lambda: self._editor_validate_frames(s_edit, 1, max_frames, is_start=True))
+
+        # 中间横杠 (对齐 .bgs 的默认 Label)
+        dash = QLabel("-")
+        dash.setStyleSheet("color: #5c6370;") 
+
+        # 结束帧
+        e_edit = QLineEdit(str(end))
+        e_edit.setObjectName("e_edit")
+        e_edit.setFixedSize(35, 22)
+        e_edit.setAlignment(Qt.AlignCenter)
+        e_edit.setFrame(False) # 这里之前你代码里写成了 s_edit，现在修好了
+        e_edit.setStyleSheet(digit_qss)
+        e_edit.editingFinished.connect(lambda: self._editor_validate_frames(e_edit, 1, max_frames, is_start=False))
+
+        # 顺序完全对齐 .bgs
+        layout.addWidget(QLabel("🎬"))
+        layout.addWidget(ns_widget)
+        layout.addStretch()
+        layout.addWidget(s_edit)
+        layout.addWidget(dash)
+        layout.addWidget(e_edit)
+
+        self.setItemWidget(child, 0, container)
+        return child
+
+    def _editor_validate_frames(self, edit_widget, min_val, max_val, is_start):
+        """编辑器专用的输入校验逻辑"""
+        try:
+            val = int(edit_widget.text())
+        except:
+            # 乱输入则恢复默认
+            val = 1 if is_start else max_val
+        
+        # 自动修正范围
+        if val < min_val: val = min_val
+        if val > max_val: val = max_val
+        
+        edit_widget.setText(str(val))
+        # 修正后刷新一下，确保预览同步
+        self._update_item_states()

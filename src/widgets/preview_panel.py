@@ -34,8 +34,11 @@ class PreviewPanel(QFrame):
         # 1. 基础面板背景 (最底层颜色)
         self.setStyleSheet("""
             PreviewPanel {
-                background-color: #11111b; 
-                border-left: 2px solid #313244;
+                background-color: #21252b; 
+                border-left: 1px solid #181a1f;
+            }
+            QLabel {
+                color: #abb2bf;
             }
         """)
         
@@ -59,9 +62,9 @@ class PreviewPanel(QFrame):
         self.preview_screen.setFixedSize(256, 256)
         self.preview_screen.setAlignment(Qt.AlignCenter)
         self.preview_screen.setStyleSheet("""
-            background-color: #181825; 
-            border-radius: 12px; 
-            border: 2px solid #313244;
+            background-color: #1F2125; 
+            border: 1px solid #3e4451; 
+            border-radius: 8px;
         """)
         self.preview_screen.setText("<div style='color: #313244; text-align: center;'>"
                                    "<span style='font-size: 20px;'>▶</span><br>"
@@ -222,16 +225,16 @@ class PreviewPanel(QFrame):
             slider_handle = "#89b4fa"                 # 深色滑块点，形成对比
             text_color = "#313244"
         else:
-            bg_color = "#181825"
+            bg_color = "#1F2125"
             slider_groove = "rgba(49, 50, 68, 180)"  # 原有的深色条
             slider_handle = "#89b4fa"                # 原有的蓝色滑块点
             text_color = "#45475a"
-
+        
         # 2. 更新预览区域背景
         self.preview_screen.setStyleSheet(f"""
             background-color: {bg_color}; 
-            border-radius: 12px; 
-            border: 2px solid #313244;
+            border-radius: 8px; 
+            border: 1px solid #3e4451;
         """)
         
         # 3. 适配 Slider 背景条颜色

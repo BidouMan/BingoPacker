@@ -23,24 +23,48 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
     def init_ui(self):
         self.setWindowTitle("Bingo Sprite Packer")
-        # --- 布局优化：既然预览面板常驻(280px)，主窗口总宽度应适当增加 ---
-        # 原左侧 760 + 右侧 280 = 1040。如果你希望维持原感，建议设为 1040
-        self.setFixedWidth(1040) 
+        # 考虑到常驻预览面板 (280px)，主窗口总宽度设为 1040 (760+280)
+        self.setFixedWidth(1040)
         self.setFixedHeight(620)
         
-        # 样式还原 - 严格遵守原始代码
+        # --- One Dark 风格配色方案 ---
+        # 背景: #282c34 | 容器: #21252b | 边框: #3e4451 
+        # 蓝色: #61afef | 灰色文本: #abb2bf | 悬停: #30353f
         self.setStyleSheet("""
-            QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; }
-            QTextEdit { 
-                background-color: #181825; 
-                border: 1px solid #313244; 
-                border-radius: 10px; 
-                padding: 5px; 
-                font-family: 'Consolas', 'Monaco', 'Menlo', 'Microsoft YaHei', 'PingFang SC', monospace;
-                font-size: 14px;
+            QMainWindow, QWidget { 
+                background-color: #282c34; 
+                color: #abb2bf; 
             }
-            QPushButton { border-radius: 6px; color: white; font-weight: bold; background-color: #313244; }
-            QPushButton:hover { background-color: #45475a; }
+            QTextEdit { 
+                background-color: #21252b; 
+                border: 1px solid #181a1f; 
+                border-radius: 8px; 
+                padding: 10px; 
+                color: #abb2bf;
+                font-family: 'Consolas', 'Monaco', 'Microsoft YaHei', monospace;
+                font-size: 13px;
+            }
+            QPushButton { 
+                background-color: #353b45; 
+                color: #d7dae0;
+                border: 1px solid #181a1f;
+                border-radius: 4px; 
+                font-weight: normal; 
+                padding: 5px 15px;
+            }
+            QPushButton:hover { 
+                background-color: #3e4451; 
+                color: #ffffff;
+            }
+            QPushButton#AssetActionBtn {
+                background-color: transparent;
+                border: none;
+                color: #56b6c2; /* 青色点缀 */
+            }
+            QPushButton#AssetActionBtn:hover {
+                color: #61afef;
+                background-color: #3e4451;
+            }
         """)
 
         self.central_widget = QWidget()
@@ -51,54 +75,56 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
         # --- 左侧主区 ---
         self.main_container = QWidget()
-        self.main_container.setFixedWidth(760) # 保持原左侧区域宽度不变
+        self.main_container.setFixedWidth(760)
         main_layout = QVBoxLayout(self.main_container)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(25, 20, 25, 25)
+        main_layout.setSpacing(15)
 
-        header = QLabel("BLOCKBINGO 资产打包工具")
-        header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("color: #89b4fa; font-size: 22px; font-weight: bold;")
-        main_layout.addWidget(header)
+        # 标题采用 One Dark 经典的软蓝色
+        # header = QLabel("BINGO SPRITE PACKER")
+        # header.setAlignment(Qt.AlignCenter)
+        # header.setStyleSheet("color: #61afef; font-size: 18px; font-weight: bold; letter-spacing: 2px;")
+        # main_layout.addWidget(header)
 
-        # --- 核心切换容器 (QStackedWidget) ---
+        # --- 核心切换容器 ---
         self.left_stack = QStackedWidget()
         
-        # 页面 0: 原始 Console
+        # 页面 0: Console
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setPlaceholderText("- 可直接点击导入或拖拽文件夹...")
+        self.console.setPlaceholderText("- Drag and drop assets here...")
+        # 控制台文本颜色微调，更具代码感
         self.console.setStyleSheet("""
-                QTextEdit { 
-                    background-color: #181825; 
-                    border: 1px solid #313244; 
-                    border-radius: 10px; 
-                    padding: 10px; 
-                    color: #cdd6f4;
-                    letter-spacing: 1px; 
-                    line-height: 120%; 
-                    font-family: 'Microsoft YaHei', 'PingFang SC', 'Consolas', monospace;
-                    font-size: 14px;
-                }
-            """)
+            QTextEdit { 
+                background-color: #21252b; 
+                border: 1px solid #181a1f; 
+                color: #98c379; /* 运行成功的绿色提示感 */
+            }
+        """)
         self.left_stack.addWidget(self.console)
 
-        # 页面 1: 编辑器
+        # 页面 1: ManualEditor
         self.editor_page = ManualEditor()
         self.left_stack.addWidget(self.editor_page)
 
         main_layout.addWidget(self.left_stack)
         
-        # --- 启动状态设置 ---
-        self.left_stack.setCurrentIndex(1) # 默认显示编辑器
+        # 默认启动进入编辑器
+        self.left_stack.setCurrentIndex(1)
         
         self.setup_bottom_buttons(main_layout)
         self.global_layout.addWidget(self.main_container)
 
-        # --- 右侧预览区 (常驻显示) ---
+        # --- 右侧预览区 (常驻) ---
         self.preview_panel = PreviewPanel()
-        # 关键修改：移除 setFixedWidth(0)，确保它以其内部定义的 280 宽度显示
-        self.preview_panel.setVisible(True) 
+        # 强制显示并应用 One Dark 深色边框线
+        # self.preview_panel.setStyleSheet("""
+        #     PreviewPanel {
+        #         # background-color: red;
+        #         border-left: 1px solid #181a1f;
+        #     }
+        # """)
+        self.preview_panel.setVisible(True)
         self.global_layout.addWidget(self.preview_panel)
 
     def setup_bottom_buttons(self, layout):

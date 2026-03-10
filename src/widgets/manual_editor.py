@@ -23,60 +23,46 @@ class ManualEditor(QWidget):
     def init_ui(self):
         # 整体 QSS 样式 (完全保留你的原始 QSS)
         self.setStyleSheet("""
-            QWidget { background-color: #4E5357; color: #cdd6f4; border: 2px solid #313244; }
-            
-            /* 资源列表样式 */
-            QListWidget { 
-                background-color: #1e1e2e; 
-                border-radius: 0px; 
-                border:none;
-                border-left: 2px solid #313244; 
-                border-top: 2px solid #313244; 
-                border-bottom: 2px solid #313244; 
+            QWidget { 
+                background-color: #282c34; 
+                color: #abb2bf; 
+                border: none; 
+            }
+            /* 左侧列表区 */
+            QListWidget {
+                background-color: #21252b;
+                border-right: 1px solid #181a1f;
                 outline: none;
-                padding: 0px;
+                padding: 5px;
             }
-            QListWidget::item { 
-                background-color: #313244;
-                color: #cdd6f4;
+            QListWidget::item {
+                background-color: #2c313a;
                 border-radius: 4px;
-                margin: 4px; 
-                min-width: 70px; max-width: 70px;
-                min-height: 70px; max-height: 70px;
-                           
+                margin-bottom: 4px;
+                padding: 5px;
             }
-            QListWidget::item:selected { 
-                background-color: #45475a; 
-                border: 1px solid #89b4fa; 
+            QListWidget::item:selected {
+                background-color: #3e4451;
+                border: 1px solid #61afef;
             }
-
-            /* 工具栏样式 */
-            #Toolbar {
-                background-color: #1D1F2E;
-                border: 2px solid #313244;
-                border-bottom: none; /* 与下方画布无缝连接 */
-                min-height: 32;
-                max-height: 32;
+            /* 中央视图区域 */
+            QGraphicsView {
+                background-color: #181a1f; /* 类似代码编辑器的背景 */
+                border: none;
             }
-            
+            /* 按钮样式 */
             QPushButton {
-                background-color: transparent; /* 平时透明，更有专业感 */
-                border:none;
-                padding: 0px;
-                min-width: 24px;  /* 图标按钮建议设为固定正方形 */
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
+                background-color: #353b45;
+                border: 1px solid #181a1f;
+                border-radius: 4px;
+                padding: 6px;
+                font-weight: bold;
             }
-            
-            QPushButton:hover { 
-                background-color: #45475a; 
+            QPushButton:hover {
+                background-color: #3e4451;
             }
-
-            /* 关键：选中后的状态（类似 PS 的工具被按下） */
-            QPushButton:checked {
-                background-color: #10111C; /* 选中后的底色 */
-                border: 1px solid #575757; /* 选中后的高亮边框 */
+            QPushButton:pressed {
+                background-color: #282c34;
             }
         """)
 
