@@ -68,7 +68,7 @@ class PreviewPanel(QFrame):
         """)
         self.preview_screen.setText("<div style='color: #313244; text-align: center;'>"
                                    "<span style='font-size: 20px;'>▶</span><br>"
-                                   "等待导入...</div>")
+                                   "等待导入</div>")
         
         # 4. 速度滑块 (无边框优化)
         self.speed_slider = QSlider(Qt.Horizontal, self.preview_screen)
@@ -99,8 +99,8 @@ class PreviewPanel(QFrame):
                 btn.setIconSize(btn.size() * 0.7)
             
             btn.setStyleSheet("""
-                QPushButton { background-color: #1e1e2e; border: none; border-radius: 4px; }
-                QPushButton:hover { background-color: #313244; }
+                QPushButton { background-color: #2F3244; border: none; border-radius: 4px; }
+                QPushButton:hover { background-color: #484B59; }
                 QPushButton:pressed { background-color: #45475a; }
             """)
             playback_layout.addWidget(btn)
@@ -182,7 +182,7 @@ class PreviewPanel(QFrame):
         self.btns["btn_scale_mode"].clicked.connect(self.toggle_scale_mode)
 
         # 点击打开编辑模式
-        self.btns["btn_editor"].clicked.connect(self.on_editor_toggle_clicked)
+        # self.btns["btn_editor"].clicked.connect(self.on_editor_toggle_clicked)
 
     def on_editor_toggle_clicked(self):
         # 获取主窗口实例并调用切换逻辑
