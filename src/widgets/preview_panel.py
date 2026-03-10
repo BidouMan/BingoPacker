@@ -205,8 +205,14 @@ class PreviewPanel(QFrame):
         """切换自适应和原始尺寸模式"""
         self.is_original_size = not self.is_original_size        
             
-        # 立即重新渲染当前帧
-        self.render_current_frame()
+        # 1. 磁盘模式刷新
+        if self.current_asset_path:
+            self.render_current_frame()
+        # 2. 内存模式刷新（针对 add_editor_source 的 item）
+        elif self.current_frames_cache:
+            if 0 <= self.current_frame_relative_idx < len(self.current_frames_cache):
+                curr_pix = self.current_frames_cache[self.current_frame_relative_idx]
+                self._display_pixmap(curr_pix)
 
     def toggle_bg_color(self):
         """在深色和白色背景之间切换，并适配 Slider 样式"""
@@ -395,13 +401,13 @@ class PreviewPanel(QFrame):
         # 没有任何数据时停止
         else:
             self.play_timer.stop()
-            self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
+            self.btns["play"].setIcon(QIcon(get_resource_path("assets/icons/play.svg")))
 
     def next_frame_manual(self):
         """手动下一帧：支持 ZIP 模式和内存裁切模式"""
         # 1. 停止自动播放
         self.play_timer.stop()
-        # self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
+
 
         # 2. 核心逻辑判断
         if self.current_asset_path:
@@ -423,7 +429,7 @@ class PreviewPanel(QFrame):
     def prev_frame_manual(self):
         """手动上一帧：支持 ZIP 模式和内存裁切模式"""
         self.play_timer.stop()
-        # self.btns["play"].setIcon(QIcon(get_resource_path("resources/icons/play.svg")))
+
 
         if self.current_asset_path:
             # 传统的 .bgs/.sprite3 模式
@@ -514,15 +520,26 @@ class PreviewPanel(QFrame):
 
     def _display_pixmap(self, pixmap):
         """内部工具：负责最终把 pixmap 贴到标签上"""
+        if pixmap is None or pixmap.isNull():
+            return
+            
         container_size = self.preview_screen.size()
-        margin_factor = 0.85 
-        scaled_pixmap = pixmap.scaled(
-            container_size.width() * margin_factor, 
-            container_size.height() * margin_factor,
-            Qt.KeepAspectRatio, 
-            Qt.FastTransformation
-        )
-        self.preview_screen.setPixmap(scaled_pixmap)
+        
+        # --- 修复点：使用 if-else 明确区分两种模式 ---
+        if self.is_original_size:
+            # 原始尺寸模式
+            self.preview_screen.setPixmap(pixmap)
+        else:
+            # 自适应缩放模式
+            margin_factor = 0.85 
+            scaled_pixmap = pixmap.scaled(
+                container_size.width() * margin_factor, 
+                container_size.height() * margin_factor,
+                Qt.KeepAspectRatio, 
+                Qt.FastTransformation # 保持像素锐利
+            )
+            self.preview_screen.setPixmap(scaled_pixmap)
+            
         self.preview_screen.setAlignment(Qt.AlignCenter)
 
     # --------------------------------------------
