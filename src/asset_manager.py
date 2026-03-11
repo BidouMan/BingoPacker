@@ -30,11 +30,9 @@ class AssetManager:
         if auto_rename:
             unique_name = self.get_unique_name(bundle.name)
             if unique_name != bundle.name:
-                print(f"DEBUG: [AssetManager] 名字冲突，自动重命名: {bundle.name} -> {unique_name}")
                 bundle.name = unique_name
         
         self._storage[bundle.name] = bundle
-        print(f"DEBUG: [AssetManager] 成功注册资源: {bundle.name}")
         return bundle.name
 
     def get_asset(self, name) -> AssetBundle:

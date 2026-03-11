@@ -1,17 +1,22 @@
+import os
 from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem
-from PySide6.QtCore import Qt, QRectF, Signal
-from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtCore import Qt, QRectF, Signal, QSize
+from PySide6.QtGui import QPixmap, QIcon, QPainter
 
 from .editor_ui import EditorUI
 from .scalable_view import ScalableView, CheckerboardItem
 from .selection_manager import SelectionManager
 from ...logic_slice import SliceLogic
+from ...asset_manager import AssetManager
+from ...asset_model import AssetBundle, FrameData
 
 class ManualEditor(QWidget, EditorUI):
     slice_completed = Signal(str, list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.asset_manager = AssetManager()
+        self.current_bundle = None
         self.slice_logic = SliceLogic()
         self.current_frames = []
         self.current_source_path = None
@@ -28,20 +33,36 @@ class ManualEditor(QWidget, EditorUI):
         self.connect_signals()
 
     def connect_signals(self):
+        # 确保 UI 中的所有按钮都正确绑定
         self.btn_pick.toggled.connect(self.selection_manager.set_active)
         self.btn_slice.clicked.connect(self.on_do_slice)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
         self.btn_save.clicked.connect(self.on_save_clicked)
         self.btn_clear.clicked.connect(self.clear_all)
+        # 补全 btn_new_file 的逻辑（如有需要）
+        if hasattr(self, 'btn_new_file'):
+            self.btn_new_file.clicked.connect(lambda: print("选取文件"))
 
     def display_image(self, file_path):
+        if not os.path.exists(file_path): return
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
+
+        # 1. 模型层处理
+        asset_name = os.path.splitext(os.path.basename(file_path))[0]
+        self.current_bundle = AssetBundle(asset_name) 
+        self.current_bundle.path = file_path
+        self.current_bundle.original_pixmap = pixmap
+        self.asset_manager.register_asset(self.current_bundle)
+
+        # 2. UI 状态重置
         self.current_source_path = file_path
-        
+        self.frame_list.blockSignals(True)
         self.scene.clear()
         self.frame_list.clear()
-        
+        self.current_frames = []
+
+        # 3. 画布渲染
         rect = QRectF(0, 0, pixmap.width(), pixmap.height())
         self.view.checker_item = CheckerboardItem(rect)
         self.scene.addItem(self.view.checker_item)
@@ -53,17 +74,98 @@ class ManualEditor(QWidget, EditorUI):
         self.scene.setSceneRect(rect)
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
+        # 4. 左侧列表：原图卡片 (完全还原原始视觉)
+        icon_area = 45 
+        canvas = QPixmap(icon_area, icon_area) 
+        canvas.fill(Qt.GlobalColor.transparent)
+        thumb = pixmap.scaled(icon_area, icon_area, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        painter = QPainter(canvas)
+        painter.drawPixmap((icon_area - thumb.width()) // 2, (icon_area - thumb.height()) // 2, thumb)
+        painter.end()
+        
+        item = QListWidgetItem()
+        item.setIcon(QIcon(canvas)) 
+        item.setText(os.path.basename(file_path))
+        # --- 核心修复：强制卡片尺寸，解决不是正方形的问题 ---
+        item.setSizeHint(QSize(78, 80)) 
+        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        self.frame_list.addItem(item)
+        
+        self.frame_list.blockSignals(False)
+        self.frame_list.setCurrentRow(0)
+
     def on_do_slice(self):
-        # 逻辑同原代码，调用 slice_logic 处理...
-        pass
+        """执行裁切逻辑"""
+        bg_item = next((i for i in self.scene.items() 
+                    if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+        if not bg_item: return
+
+        rects = self.selection_manager.get_sorted_selections()
+        if rects:
+            self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
+        else:
+            self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
+
+        if self.current_frames:
+            if self.preview_item:
+                self.scene.removeItem(self.preview_item)
+                self.preview_item = None
+            
+            if bg_item: bg_item.setVisible(False)
+            self.selection_manager.clear_selections()
+            self.selection_manager.set_active(False)
+
+            # 更新场景
+            first_pix = self.current_frames[0]["pixmap"]
+            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            self.scene.setSceneRect(new_rect)
+            if hasattr(self.view, 'checker_item'):
+                self.view.checker_item.set_rect(new_rect)
+
+            self.update_frame_list_ui() # 刷新列表
+            self.frame_list.setCurrentRow(0)
+            self.switch_frame_preview(0)
+
+    def update_frame_list_ui(self):
+        """刷新左侧裁切后的帧列表"""
+        self.frame_list.clear()
+        for i, frame in enumerate(self.current_frames):
+            pix = frame["pixmap"]
+            item = QListWidgetItem(f"帧 {i:02d}")
+            # --- 核心修复：强制正方形卡片尺寸 ---
+            item.setSizeHint(QSize(78, 80)) 
+            icon_pix = pix.scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio, 
+                                Qt.TransformationMode.SmoothTransformation)
+            item.setIcon(QIcon(icon_pix))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.frame_list.addItem(item)
 
     def switch_frame_preview(self, index):
-        # 逻辑同原代码，更新预览图层...
-        pass
+        """切换显示单帧预览"""
+        if index < 0 or index >= len(self.current_frames): return
+        pix = self.current_frames[index]["pixmap"]
+        new_rect = QRectF(0, 0, pix.width(), pix.height())
+
+        self.scene.setSceneRect(new_rect)
+        if hasattr(self.view, 'checker_item') and self.view.checker_item:
+            self.view.checker_item.set_rect(new_rect)
+
+        if self.preview_item is None:
+            self.preview_item = QGraphicsPixmapItem()
+            self.scene.addItem(self.preview_item)
+        
+        self.preview_item.setPixmap(pix)
+        self.preview_item.setVisible(True)
+        self.preview_item.setZValue(1)
+        self.preview_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+        self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
     def on_save_clicked(self):
-        # 保存逻辑...
-        pass
+        """保存逻辑：集成 SliceLogic"""
+        if not self.current_frames: return
+        pixmaps = [f["pixmap"] for f in self.current_frames]
+        save_dir = self.slice_logic.save_sliced_sprites(self.current_source_path, pixmaps)
+        print(f"已保存至: {save_dir}")
 
     def clear_all(self):
         self.scene.clear()

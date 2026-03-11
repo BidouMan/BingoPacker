@@ -32,14 +32,15 @@ class ScalableView(QGraphicsView):
         if urls:
             path = urls[0].toLocalFile()
             if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 寻找父级 ManualEditor
-                p = self.parent()
-                while p:
-                    if hasattr(p, 'display_image'):
-                        p.display_image(path)
-                        break
-                    p = p.parent()
-                event.acceptProposedAction()
+                # 通过查找父级找到 ManualEditor 逻辑类
+                target = self.parent()
+                # 兼容性检查：如果 parent 只是一个 layout 容器，可能需要再往上找
+                while target and not hasattr(target, 'display_image'):
+                    target = target.parent()
+                
+                if target:
+                    target.display_image(path)
+                    event.acceptProposedAction()
 
     def wheelEvent(self, event: QWheelEvent):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
