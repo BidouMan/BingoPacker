@@ -173,7 +173,11 @@ class ManualEditor(QWidget, EditorUI):
         self.frame_list.clear()
         for i, frame in enumerate(self.current_frames):
             pix = frame["pixmap"]
-            item = QListWidgetItem(f"帧 {i:02d}")
+            
+            # --- 核心修改：i + 1 让显示从 "帧 01" 开始 ---
+            display_index = i + 1
+            item = QListWidgetItem(f"帧 {display_index:02d}")
+            
             # 强制卡片为正方形尺寸，对应 UI 中的 list 宽度
             item.setSizeHint(QSize(78, 80)) 
             
