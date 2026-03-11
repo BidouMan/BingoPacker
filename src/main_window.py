@@ -159,12 +159,24 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
 
     def on_editor_bundle_changed(self, bundle):
+        """处理来自 ManualEditor 的素材同步"""
+        # 1. 更新左侧树 (确保洛克人出现在树里)
         tree = self.preview_panel.asset_tree
-        if tree._find_root_by_bundle(bundle):
-            tree.update_bundle_data(bundle) # 已经有了就更新数字
+        root = tree._find_root_by_bundle(bundle)
+        if not root:
+            tree.add_bundle(bundle)
         else:
-            tree.clear()
-            tree.add_bundle(bundle) # 没有就新建
+            tree.update_bundle_data(bundle)
+        
+        # 2. 【核心修复】将数据推送到右侧预览屏幕
+        if bundle.segments:
+            # 获取第一个片段 (通常是导入时默认创建的 {"name": "Default", "start": 1, "end": 1})
+            default_segment = bundle.segments[0]
+            
+            # 调用重构后的 PreviewPanel 接口
+            self.preview_panel.start_segment_preview(bundle, default_segment)
+            
+            print(f"DEBUG [MainWindow]: 已激活预览面板，当前片段: {default_segment['name']}")
 
     def handle_export_bgs_request(self):
         target = None

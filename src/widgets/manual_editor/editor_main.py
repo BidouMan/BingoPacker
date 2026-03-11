@@ -113,6 +113,30 @@ class ManualEditor(QWidget, EditorUI):
         
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
+        self._sync_to_global_preview(file_path, pixmap)
+
+    def _sync_to_global_preview(self, file_path, pixmap):
+        """将当前编辑器加载的单图同步到全局 AssetTree 和 PreviewPanel"""        
+        # 1. 构造 FrameData 时传入 rect
+        # 对于初次加载的整图，rect 就是 (0, 0, width, height)
+        full_rect = QRectF(0, 0, pixmap.width(), pixmap.height())
+        
+        if not self.current_bundle.frames:
+            # 传入 pixmap 和对应的 rect
+            self.current_bundle.frames = [FrameData(pixmap=pixmap, rect=full_rect)]
+        
+        # 2. 确保有默认片段
+        if not self.current_bundle.segments:
+            self.current_bundle.segments = [{"name": "Default", "start": 1, "end": 1}]
+
+        # 3. 寻找主窗口并同步
+        target = self.parent()
+        while target and target.__class__.__name__ != "BingoPacker":
+            target = target.parent()
+
+        if target:
+            target.on_editor_bundle_changed(self.current_bundle)
+            print(f"DEBUG [Editor]: 已同步素材 '{self.current_bundle.name}' (1帧, {pixmap.width()}x{pixmap.height()})")
 
     def on_do_slice(self):
         """执行裁切"""

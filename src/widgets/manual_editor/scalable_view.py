@@ -36,14 +36,25 @@ class ScalableView(QGraphicsView):
         if urls:
             path = urls[0].toLocalFile()
             if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 通过查找父级找到 ManualEditor 逻辑类
+                # 寻找 ManualEditor
                 target = self.parent()
-                # 兼容性检查：如果 parent 只是一个 layout 容器，可能需要再往上找
                 while target and not hasattr(target, 'display_image'):
                     target = target.parent()
                 
                 if target:
+                    # 1. 让编辑器显示图
                     target.display_image(path)
+                    
+                    # 2. 【新增】寻找 MainWindow 并触发全局导入逻辑
+                    # 这样能保证左侧树和右侧预览同步更新
+                    win = target.parent()
+                    while win and win.__class__.__name__ != "BingoPacker": # 替换为你主窗口类名
+                        win = win.parent()
+                    
+                    # if win:
+                    #     # 强行调用你 MainWindow 里的处理函数
+                    #     win.handle_single_import(path) 
+                    
                     event.acceptProposedAction()
 
     def wheelEvent(self, event: QWheelEvent):
