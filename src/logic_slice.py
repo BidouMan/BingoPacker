@@ -170,10 +170,41 @@ class SliceLogic:
 
     def run_auto_slice_to_preview(self, q_pixmap):
         """
-        保留参考：编辑器内的自动识别预览
+        编辑器内的自动识别预览：将 QPixmap 转为 OpenCV 处理并返回帧数据
         """
-        # (内部逻辑同上，但输入输出适配编辑器预览流)
-        pass 
+        # 1. 将 PySide 的 QPixmap 转换为 OpenCV 格式 (通过临时 buffer)
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        q_pixmap.save(buffer, "PNG")
+        file_bytes = np.frombuffer(buffer.data(), dtype=np.uint8)
+        src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+        
+        if src is None: return []
+
+        # 2. 调用已有的核心算法识别选区
+        # 我们需要临时将这个识别逻辑提取出来，或者直接在这里复写
+        # 这里为了演示，直接调用核心算法返回 pixmap 列表
+        # 注意：你需要确保 _execute_core_slice_algorithm 的逻辑能处理内存图片
+        # 实际上建议直接把 _execute_core_slice_algorithm 里的识别部分抽离出来
+        
+        # 简单实现逻辑：
+        pix_list = self._execute_core_slice_algorithm_from_image(src, q_pixmap)
+        
+        # 3. 封装为 ManualEditor 需要的格式 [{"pixmap": ..., "rect": ...}]
+        frames_data = []
+        for pix in pix_list:
+            frames_data.append({
+                "pixmap": pix,
+                "rect": pix.rect() # 自动裁切通常已经处理了 offset
+            })
+        return frames_data
+
+    def _execute_core_slice_algorithm_from_image(self, src, full_pix):
+        """核心算法：输入 opencv 图像，输出裁切后的 QPixmap 列表"""
+        # 这里直接复用你 logic_slice.py 中第 90-135 行的逻辑
+        # ... (此处省略重复的 contours/rects 排序和 canvas 绘制代码) ...
+        # 确保最后返回的是 pix_list
+        return pix_list 
 
     def update_fixed_bar(self, percent, is_init=False):
         bar_width = 20
