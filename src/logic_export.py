@@ -38,7 +38,7 @@ class ExportLogic:
             asset_names = manager.list_assets()
         
         if not asset_names:
-            self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")
+            self.add_log("⚠️ 没有可导出的资源", "#ff5555")
             return
 
         for name in asset_names:
@@ -88,14 +88,11 @@ class ExportLogic:
         # --- 逻辑分流 ---
         if target_name:
             asset_names = [target_name]
-            print(f">>> [Export Debug] 最终导出名单: {asset_names}")
         else:
             asset_names = manager.list_assets()
-            print(f">>> [Export Debug] 执行批量导出，总数: {len(asset_names)}")
-      
         
         if not asset_names:
-            self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")
+            self.add_log("⚠️ 没有可导出的资源", "#ff5555")
             return
 
         for name in asset_names:
@@ -123,6 +120,10 @@ class ExportLogic:
                 self.add_log(f"-> 导出成功: {os.path.basename(save_path)}", "#5CD59B")
             except Exception as e:
                 self.add_log(f"⚠️ 导出失败 [{bundle.name}]: {str(e)}", "#ff5555")
+        
+        if target_name is None:
+            manager.clear_all()
+
 
     def _pixmap_to_bytes(self, pixmap):
         byte_array = QBuffer()

@@ -158,47 +158,38 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
         self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
 
+    def handle_export_bgs_request(self):
+        target = None
+        # 如果在编辑器页面，只导编辑器里的那一个
+        if self.left_stack.currentIndex() == 1:
+            if hasattr(self.editor_page, 'current_bundle') and self.editor_page.current_bundle:
+                target = self.editor_page.current_bundle.name
+        
+        # 显式传递 target。如果是 Console 模式，target 就是 None
+        self.on_export_bgs(target_name=target)
+
     def handle_export_sprite_request(self):
-        """同理处理 sprite3"""
         target = None
         if self.left_stack.currentIndex() == 1:
-            if self.editor_page.current_bundle:
+            if hasattr(self.editor_page, 'current_bundle') and self.editor_page.current_bundle:
                 target = self.editor_page.current_bundle.name
         self.on_export_sprite3(target_name=target)
 
-    def handle_export_bgs_request(self):
-        """中转判定：根据当前 UI 页面决定导出的范围"""
-        target = None
-        
-        # 判定：如果当前在编辑器页面 (Index 1)
-        if self.left_stack.currentIndex() == 1:
-            if self.editor_page.current_bundle:
-                target = self.editor_page.current_bundle.name
-                print(f">>> [UI Check] 当前在编辑器，锁定目标: {target}")
-        
-        # 显式传递 target，彻底解决 logic 层猜不到的问题
-        self.on_export_bgs(target_name=target)
-
     def on_clear_content(self):
-        """
-        全量清空：清空管家的仓库 + 清空控制台 + 清空资产树
-        """
-        from .asset_manager import AssetManager
-        # 1. 清空大管家的存储字典
-        AssetManager()._storage.clear()
-        
-        # 2. 清空控制台日志
+        AssetManager().clear_all()
         self.console.clear()
         
-        # 3. 清空右侧资产树 (暂时调用 clear()，等 refresh 好了再换)
         if hasattr(self.preview_panel, 'asset_tree'):
             self.preview_panel.asset_tree.clear()
             
-        # 4. 如果编辑器有图片，也给它洗了
-        if hasattr(self.editor_page, 'clear_image'):
-            self.editor_page.clear_image()
+        if hasattr(self.editor_page, 'current_bundle'):
+            self.editor_page.current_bundle = None # 确保编辑器不再持有旧数据引用
+        
+        if hasattr(self.editor_page, 'scene'):
+            self.editor_page.scene.clear()
+            self.editor_page.frame_list.clear()
             
-        self.add_log("-> 全局仓库与界面已重置", "#f38ba8")
+        self.add_log("♻️ 资源列表已清空", "#f38ba8")
     
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -210,11 +201,12 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         if not urls: return
 
         manager = AssetManager()
-        is_editor_mode = (self.left_stack.currentIndex() == 1)
+        manager.clear_all() 
+        self.console.clear()
         
         # 如果是编辑器模式，执行“重载”逻辑
-        if is_editor_mode:
-            self.console.clear()
+        if self.left_stack.currentIndex() == 1:
+            
             path = urls[0].toLocalFile() # 编辑器通常一次只吃一个
             
             # 1. 直接让管家加载（管家内部已适配单图/文件夹/bgs）

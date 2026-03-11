@@ -18,7 +18,6 @@ class AssetManager:
         return cls._instance
 
     # --- 基础管理功能 ---
-
     def register_asset(self, bundle: AssetBundle, auto_rename=True):
         """
         将资源注册到仓库中。
@@ -51,6 +50,18 @@ class AssetManager:
             counter += 1
             name = f"{base_name}_{counter}"
         return name
+
+    def clear_all(self):
+        """全量清空"""
+        self._storage.clear()
+    
+    def remove_asset(self, name):
+        """从仓库中移除特定的资源项"""
+        if name in self._storage:
+            del self._storage[name]
+            print(f">>> [AssetManager] 资源 {name} 已移除")
+            return True
+        return False
 
     # --- 核心导入方法 (入口) ---
 
