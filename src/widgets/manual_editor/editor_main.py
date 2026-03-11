@@ -95,44 +95,42 @@ class ManualEditor(QWidget, EditorUI):
         self.frame_list.setCurrentRow(0)
 
     def on_do_slice(self):
-        print(10)
-        """核心逻辑：判断并执行 自动/手动 裁切"""
-        # 1. 查找场景中的主图 (跳过预览图层和克隆图层)
+        """执行裁切"""
         bg_item = next((i for i in self.scene.items() 
                     if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
         if not bg_item: return
 
-        # 2. 从选取管理器获取用户拉出的选区列表
         rects = self.selection_manager.get_sorted_selections()
-
-        # 3. 核心分支判断
         if rects:
-            # 如果有手动选区：执行手动裁切 (run_manual_slice)
+            # 手动裁切
             self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
-            # 如果没有选区：执行自动识别裁切 (run_auto_slice_to_preview)
-            # 注意：这里需要传入当前 QPixmap
+            # 自动裁切：调用补全后的 logic_slice 方法
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
-        # 4. 如果裁切成功，更新 UI 状态
         if self.current_frames:
-            # 清理旧的预览状态
+            # 1. 彻底清理旧状态
             if self.preview_item:
                 self.scene.removeItem(self.preview_item)
                 self.preview_item = None
             
-            # 隐藏底图，准备进入帧预览模式
+            # 隐藏底图
             bg_item.setVisible(False)
-            
-            # 关闭选取工具并清除蚂蚁线
             self.selection_manager.clear_selections()
             self.selection_manager.set_active(False)
-            self.btn_pick.setChecked(False) # 工具栏按钮同步弹起
 
-            # 更新左侧列表 UI
-            self.update_frame_list_ui()
+            # 2. 强制刷新场景和棋盘格
+            first_pix = self.current_frames[0]["pixmap"]
+            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            self.scene.setSceneRect(new_rect)
             
-            # 默认选中第一帧并显示预览
+            if hasattr(self.view, 'checker_item'):
+                self.view.checker_item.set_rect(new_rect)
+
+            # 3. 刷新列表显示
+            self.update_frame_list_ui()
+
+            # 4. 默认选中第一帧
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
 

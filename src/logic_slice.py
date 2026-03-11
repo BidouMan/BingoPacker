@@ -168,43 +168,67 @@ class SliceLogic:
             frames_data.append({"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy)})
         return frames_data
 
+    # logic_slice.py 补全后的方法
+
     def run_auto_slice_to_preview(self, q_pixmap):
         """
-        编辑器内的自动识别预览：将 QPixmap 转为 OpenCV 处理并返回帧数据
+        自动识别算法：将 QPixmap 转换为 OpenCV 处理，返回预览用的帧数据列表
         """
-        # 1. 将 PySide 的 QPixmap 转换为 OpenCV 格式 (通过临时 buffer)
+        # 1. QPixmap 转 OpenCV (通过 bytes 中转最稳健)
         buffer = QBuffer()
-        buffer.open(QIODevice.WriteOnly)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         q_pixmap.save(buffer, "PNG")
         file_bytes = np.frombuffer(buffer.data(), dtype=np.uint8)
         src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
         
         if src is None: return []
-
-        # 2. 调用已有的核心算法识别选区
-        # 我们需要临时将这个识别逻辑提取出来，或者直接在这里复写
-        # 这里为了演示，直接调用核心算法返回 pixmap 列表
-        # 注意：你需要确保 _execute_core_slice_algorithm 的逻辑能处理内存图片
-        # 实际上建议直接把 _execute_core_slice_algorithm 里的识别部分抽离出来
         
-        # 简单实现逻辑：
-        pix_list = self._execute_core_slice_algorithm_from_image(src, q_pixmap)
+        # 2. 复用 OpenCV 识别逻辑 (闭运算 + 轮廓提取)
+        alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        gap_threshold = 3 
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_threshold, gap_threshold))
+        closed_alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed_alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # 3. 封装为 ManualEditor 需要的格式 [{"pixmap": ..., "rect": ...}]
-        frames_data = []
-        for pix in pix_list:
-            frames_data.append({
-                "pixmap": pix,
-                "rect": pix.rect() # 自动裁切通常已经处理了 offset
-            })
-        return frames_data
+        raw_rects = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            if w < 2 or h < 2: continue
+            roi_alpha = alpha[y:y+h, x:x+w]
+            coords = cv2.findNonZero(roi_alpha)
+            if coords is not None:
+                ix, iy, iw, ih = cv2.boundingRect(coords)
+                # 存为 QRect 格式
+                from PySide6.QtCore import QRect
+                raw_rects.append(QRect(x + ix, y + iy, iw, ih))
 
-    def _execute_core_slice_algorithm_from_image(self, src, full_pix):
-        """核心算法：输入 opencv 图像，输出裁切后的 QPixmap 列表"""
-        # 这里直接复用你 logic_slice.py 中第 90-135 行的逻辑
-        # ... (此处省略重复的 contours/rects 排序和 canvas 绘制代码) ...
-        # 确保最后返回的是 pix_list
-        return pix_list 
+        if not raw_rects: return []
+
+        # 3. 行排序逻辑
+        raw_rects.sort(key=lambda r: (r.y() + r.height()/2))
+        
+        final_sorted_rects = []
+        current_row = []
+        avg_h = sum(r.height() for r in raw_rects) / len(raw_rects)
+        row_threshold = avg_h * 0.6
+        
+        last_center_y = raw_rects[0].y() + raw_rects[0].height()/2
+        for r in raw_rects:
+            curr_center_y = r.y() + r.height()/2
+            if abs(curr_center_y - last_center_y) < row_threshold:
+                current_row.append(r)
+            else:
+                current_row.sort(key=lambda rect: rect.x())
+                final_sorted_rects.extend(current_row)
+                current_row = [r]
+                last_center_y = curr_center_y
+        current_row.sort(key=lambda rect: rect.x())
+        final_sorted_rects.extend(current_row)
+
+        # 4. 生成统一格式的预览数据
+        # 构造一个模拟对象以适配 run_manual_slice 的参数要求
+        mock_bg_item = type('obj', (object,), {'pixmap': lambda: q_pixmap})
+        return self.run_manual_slice(mock_bg_item, final_sorted_rects)
 
     def update_fixed_bar(self, percent, is_init=False):
         bar_width = 20
