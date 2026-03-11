@@ -156,7 +156,15 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.btn_bgs.clicked.connect(self.handle_export_bgs_request)    
         self.btn_sprite.clicked.connect(self.handle_export_sprite_request)
 
-        self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
+        self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
+
+    def on_editor_bundle_changed(self, bundle):
+        tree = self.preview_panel.asset_tree
+        if tree._find_root_by_bundle(bundle):
+            tree.update_bundle_data(bundle) # 已经有了就更新数字
+        else:
+            tree.clear()
+            tree.add_bundle(bundle) # 没有就新建
 
     def handle_export_bgs_request(self):
         target = None

@@ -167,7 +167,7 @@ class PreviewPanel(QFrame):
         self.btns["next"].clicked.connect(self.next_frame_manual)
         
         # 2. 点击资源列表切换预览
-        self.asset_tree.segment_selected.connect(self.start_preview_animation)
+        # self.asset_tree.segment_selected.connect(self.start_preview_animation)
         
         # 3. 原有功能
         self.btn_tree_upload.clicked.connect(self.on_upload_clicked)

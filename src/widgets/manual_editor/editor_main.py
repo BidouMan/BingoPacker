@@ -12,7 +12,8 @@ from ...asset_model import AssetBundle, FrameData
 
 class ManualEditor(QWidget, EditorUI):
     slice_completed = Signal(str, list)
-
+    bundle_updated = Signal(object)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.asset_manager = AssetManager()
@@ -34,6 +35,18 @@ class ManualEditor(QWidget, EditorUI):
         self.view.selection_manager = self.selection_manager
         self.setAcceptDrops(True)
         self.connect_signals()
+
+    # --- 核心：数据驱动的属性拦截 ---
+    @property
+    def current_bundle(self):
+        return self._current_bundle
+
+    @current_bundle.setter
+    def current_bundle(self, bundle):
+        self._current_bundle = bundle
+        # 只要 bundle 对象被重新赋值，立刻通知 AssetTree
+        if bundle:
+            self.bundle_updated.emit(bundle)
 
     def connect_signals(self):
         # 确保 UI 中的所有按钮都正确绑定
@@ -122,6 +135,10 @@ class ManualEditor(QWidget, EditorUI):
                     FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}") 
                     for i, f in enumerate(self.current_frames)
                 ]
+                
+                # 发送信号 更新资源表
+                self.bundle_updated.emit(self.current_bundle)
+                
             # 1. 彻底清理旧状态
             if self.preview_item:        
                 try:
