@@ -134,7 +134,7 @@ class SliceLogic:
             canvas = QPixmap(side, side)
             canvas.fill(Qt.GlobalColor.transparent)
             p = QPainter(canvas)
-            p.drawPixmap((side - w) // 2, max(0, side - h - 6), full_pix.copy(x, y, w, h))
+            p.drawPixmap((side - w) // 2, max(0, side - h - 4), full_pix.copy(x, y, w, h))
             p.end()
             pix_list.append(canvas)
         return pix_list
@@ -155,14 +155,15 @@ class SliceLogic:
         full_pixmap = bg_item.pixmap()
         max_w = max(r.width() for r in selection_rects)
         max_h = max(r.height() for r in selection_rects)
-        side = max(max_w, max_h) + 20
+        side = max(max_w, max_h) + 8
+        
         if side % 2 != 0: side += 1
 
         for rect in selection_rects:
             canvas = QPixmap(side, side)
             canvas.fill(Qt.GlobalColor.transparent)
             painter = QPainter(canvas)
-            ox, oy = (side - rect.width()) // 2, max(0, side - rect.height() - 6)
+            ox, oy = (side - rect.width()) // 2, max(0, side - rect.height() - 4)
             painter.drawPixmap(ox, oy, full_pixmap.copy(rect))
             painter.end()
             frames_data.append({"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy)})
@@ -231,7 +232,7 @@ class SliceLogic:
         return self.run_manual_slice(mock_bg_item, final_sorted_rects)
 
     def update_fixed_bar(self, percent, is_init=False):
-        bar_width = 20
+        bar_width = 8
         filled_count = int(bar_width * (percent / 100))
         bar_content = "━" * filled_count + "─" * (bar_width - filled_count)
         progress_text = f"-> {bar_content} [{percent:>6.1f}%]"

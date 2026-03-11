@@ -78,7 +78,7 @@ class ManualEditor(QWidget, EditorUI):
         icon_area = 45 
         canvas = QPixmap(icon_area, icon_area) 
         canvas.fill(Qt.GlobalColor.transparent)
-        thumb = pixmap.scaled(icon_area, icon_area, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        thumb = pixmap.scaled(icon_area, icon_area, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
         painter = QPainter(canvas)
         painter.drawPixmap((icon_area - thumb.width()) // 2, (icon_area - thumb.height()) // 2, thumb)
         painter.end()
@@ -145,7 +145,7 @@ class ManualEditor(QWidget, EditorUI):
             
             # 列表内的缩略图处理
             icon_pix = pix.scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio, 
-                                Qt.TransformationMode.SmoothTransformation)
+                                Qt.TransformationMode.FastTransformation)
             item.setIcon(QIcon(icon_pix))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.frame_list.addItem(item)
