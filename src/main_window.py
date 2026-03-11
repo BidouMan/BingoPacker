@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QPushButton, QTextEdit, QLabel, QStackedWidget)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QIcon, QTextCursor, QTextBlockFormat, QTextCharFormat
+from PySide6.QtGui import QIcon, QTextCursor, QTextBlockFormat, QTextCharFormat,QColor
 
 from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
@@ -78,18 +78,13 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        # 标题采用 One Dark 经典的软蓝色
-        # header = QLabel("BINGO SPRITE PACKER")
-        # header.setAlignment(Qt.AlignCenter)
-        # header.setStyleSheet("color: #61afef; font-size: 18px; font-weight: bold; letter-spacing: 2px;")
-        # main_layout.addWidget(header)
-
         # --- 核心切换容器 ---
         self.left_stack = QStackedWidget()
         
         # 页面 0: Console
         self.console = QTextEdit()
         self.console.setReadOnly(True)
+        
         self.console.setPlaceholderText("- Drag and drop assets here...")
         # 控制台文本颜色微调，更具代码感
         self.console.setStyleSheet("""
@@ -151,9 +146,9 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
     def connect_signals(self):
         # 1. 基础功能
-        # self.btn_upload.clicked.connect(self.on_upload_folder)
+        self.btn_upload.clicked.connect(lambda:self.left_stack.setCurrentIndex(0))
         self.btn_clear.clicked.connect(self.on_clear_content)
-        self.btn_editor.clicked.connect(self.toggle_editor_view)
+        self.btn_editor.clicked.connect(lambda: self.left_stack.setCurrentIndex(1))
         self.btn_slice.clicked.connect(self.on_slice_clicked)
 
 
@@ -163,11 +158,6 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
         self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
 
-    # 供外部/PreviewPanel 调用的页面切换接口
-    def toggle_editor_view(self):
-        new_idx = 1 if self.left_stack.currentIndex() == 0 else 0
-        self.left_stack.setCurrentIndex(new_idx)
-        return new_idx == 1
 
     def on_clear_content(self):
         """
@@ -237,19 +227,31 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
                     final_name = manager.register_asset(bundle)
                     self.add_log(f"-> 已载入资源: {final_name}", "#89b4fa")
             
+            # Todo
             # 暂时注释掉报错行，稍后处理
             # self.preview_panel.asset_tree.refresh_from_manager()
-    def add_log(self, message, color="#abb2bf"):
-        """统一的日志输出方法"""
-        from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+
+
+    def add_log(self, msg, color="#cdd6f4", replace_last=False):
+        """
+        完全还原老代码：通过控制光标选中整行来实现原地替换
+        """
+        from PySide6.QtGui import QTextCursor
+        # 构造 HTML 内容
+        log_html = f'<div style="color:{color}; line-height: 110%; margin-bottom: 2px;">{msg}</div>'
         
-        cursor = self.console.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        cursor.setCharFormat(fmt)
-        
-        cursor.insertText(f"{message}\n")
-        self.console.setTextCursor(cursor)
-        self.console.ensureCursorVisible()
+        if replace_last:
+            cursor = self.console.textCursor()
+            # 1. 移动到文档最末尾
+            cursor.movePosition(QTextCursor.End)
+            # 2. 选中当前行（即最后一行）
+            cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
+            # 3. 删除旧内容并插入新 HTML
+            cursor.removeSelectedText()
+            cursor.insertHtml(log_html)
+        else:
+            # 正常模式：追加新行
+            self.console.append(log_html)
+            
+        # 始终滚动到底部
+        self.console.moveCursor(QTextCursor.End)
