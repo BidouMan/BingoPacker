@@ -139,58 +139,69 @@ class ManualEditor(QWidget, EditorUI):
             print(f"DEBUG [Editor]: 已同步素材 '{self.current_bundle.name}' (1帧, {pixmap.width()}x{pixmap.height()})")
 
     def on_do_slice(self):
-        """执行裁切"""
+        """执行裁切并同步到预览"""
         bg_item = next((i for i in self.scene.items() 
                     if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
         if not bg_item: return
 
         rects = self.selection_manager.get_sorted_selections()
         if rects:
-            # 手动裁切
             self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
-            # 自动裁切：调用补全后的 logic_slice 方法
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
         if self.current_frames:
             if self.current_bundle:
-                from ...asset_model import FrameData # 确保已导入
+                from ...asset_model import FrameData
+                
+                # 1. 更新帧数据
                 self.current_bundle.frames = [
                     FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}") 
                     for i, f in enumerate(self.current_frames)
                 ]
                 
-                # 发送信号 更新资源表
+                # 2. 【新增】更新片段信息：将所有裁切出的帧定义为一个动画片段
+                # 这样 PreviewPanel 拿到后，看到 end > start 就会自动播放
+                self.current_bundle.segments = [
+                    {"name": "Animation", "start": 1, "end": len(self.current_frames)}
+                ]
+                
+                # 3. 发送内部信号更新资源表
                 self.bundle_updated.emit(self.current_bundle)
                 
-            # 1. 彻底清理旧状态
+                # 4. 【新增】触发全局预览同步
+                # 这会通过 BingoPacker 调用 preview_panel.start_segment_preview
+                self._sync_after_slice()
+
+            # --- 以下是原有的 UI 刷新逻辑 ---
             if self.preview_item:        
-                try:
-                    self.scene.removeItem(self.preview_item)
-                except RuntimeError:
-                    # 如果已经因为 scene.clear() 被删除了，直接跳过即可
-                    pass
+                try: self.scene.removeItem(self.preview_item)
+                except: pass
                 self.preview_item = None
             
-            # 隐藏底图
             bg_item.setVisible(False)
             self.selection_manager.clear_selections()
             self.selection_manager.set_active(False)
 
-            # 2. 强制刷新场景和棋盘格
             first_pix = self.current_frames[0]["pixmap"]
             new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
             self.scene.setSceneRect(new_rect)
-            
             if hasattr(self.view, 'checker_item'):
                 self.view.checker_item.set_rect(new_rect)
 
-            # 3. 刷新列表显示
             self.update_frame_list_ui()
-
-            # 4. 默认选中第一帧
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
+
+    def _sync_after_slice(self):
+        """专门用于裁切后的同步"""
+        target = self.parent()
+        while target and target.__class__.__name__ != "BingoPacker":
+            target = target.parent()
+
+        if target and hasattr(target, 'on_editor_bundle_changed'):
+            target.on_editor_bundle_changed(self.current_bundle)
+            print(f"DEBUG [Editor]: 裁切同步完成，共 {len(self.current_bundle.frames)} 帧")
 
     def update_frame_list_ui(self):
         """将裁切后的每一帧存入左侧列表，并强制正方形尺寸"""
