@@ -1,6 +1,7 @@
 import os
 from PySide6.QtWidgets import QFileDialog, QListView, QTreeView, QAbstractItemView
 from PySide6.QtGui import QTextCursor
+from .asset_manager import AssetManager
 
 class UploadLogic:
     def on_upload_folder(self):
@@ -112,13 +113,16 @@ class UploadLogic:
         self.console.moveCursor(QTextCursor.End)
     
     def on_clear_content(self):
-        """严格还原原版的清空逻辑"""
-        # 1. 清空核心数据变量
-        self.selected_folders = []
-        self.asset_files = []
+        # 1. 清空仓库数据
+        AssetManager()._storage.clear()
         
         # 2. 清空 UI 显示
         self.console.clear()
+        self.preview_panel.asset_tree.clear() # 树也要清空
+        
+        # 3. 如果编辑器正在显示，也让它重置
+        if hasattr(self.editor_page, 'reset_editor'):
+            self.editor_page.reset_editor()
         
         # 3. 打印清空成功的提示 (使用原版黄色字体风格)
         self.add_log("♻️ <b>资源列表已清空</b>", "#f38ba8")

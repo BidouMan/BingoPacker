@@ -10,14 +10,12 @@ from .logic_upload import UploadLogic
 from .logic_export import ExportLogic
 from .logic_slice import SliceLogic
 from .widgets.manual_editor import ManualEditor
+from .asset_manager import AssetManager
+from .asset_model import FrameData,AssetBundle
 
-class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic): 
+class BingoPacker(QMainWindow, ExportLogic,SliceLogic): 
     def __init__(self):
-        super().__init__()
-        # 还原原版核心变量名
-        self.selected_folders = []
-        self.asset_files = []
-        
+        super().__init__()        
         self.init_ui()
         self.connect_signals()
 
@@ -117,13 +115,6 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
         # --- 右侧预览区 (常驻) ---
         self.preview_panel = PreviewPanel()
-        # 强制显示并应用 One Dark 深色边框线
-        # self.preview_panel.setStyleSheet("""
-        #     PreviewPanel {
-        #         # background-color: red;
-        #         border-left: 1px solid #181a1f;
-        #     }
-        # """)
         self.preview_panel.setVisible(True)
         self.global_layout.addWidget(self.preview_panel)
 
@@ -160,7 +151,7 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
 
     def connect_signals(self):
         # 1. 基础功能
-        self.btn_upload.clicked.connect(self.on_upload_folder)
+        # self.btn_upload.clicked.connect(self.on_upload_folder)
         self.btn_clear.clicked.connect(self.on_clear_content)
         self.btn_editor.clicked.connect(self.toggle_editor_view)
         self.btn_slice.clicked.connect(self.on_slice_clicked)
@@ -178,47 +169,87 @@ class BingoPacker(QMainWindow, UploadLogic, ExportLogic,SliceLogic):
         self.left_stack.setCurrentIndex(new_idx)
         return new_idx == 1
 
+    def on_clear_content(self):
+        """
+        全量清空：清空管家的仓库 + 清空控制台 + 清空资产树
+        """
+        from .asset_manager import AssetManager
+        # 1. 清空大管家的存储字典
+        AssetManager()._storage.clear()
+        
+        # 2. 清空控制台日志
+        self.console.clear()
+        
+        # 3. 清空右侧资产树 (暂时调用 clear()，等 refresh 好了再换)
+        if hasattr(self.preview_panel, 'asset_tree'):
+            self.preview_panel.asset_tree.clear()
+            
+        # 4. 如果编辑器有图片，也给它洗了
+        if hasattr(self.editor_page, 'clear_image'):
+            self.editor_page.clear_image()
+            
+        self.add_log("-> 全局仓库与界面已重置", "#f38ba8")
     
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    # 在 main_window.py 的 dropEvent 中修改
-    # 在 main_window.py 中修改
+   
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         if not urls: return
 
-        # --- 核心修复：如果是编辑器模式，且拖入的是单张图片，执行强制重置 ---
+        manager = AssetManager()
         is_editor_mode = (self.left_stack.currentIndex() == 1)
         
-        for url in urls:
-            path = url.toLocalFile()
+        # 如果是编辑器模式，执行“重载”逻辑
+        if is_editor_mode:
+            self.console.clear()
+            path = urls[0].toLocalFile() # 编辑器通常一次只吃一个
             
-            # 如果是编辑器模式且是图片：先清空，再加载（确保全局只有一个素材）
-            if is_editor_mode and path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 1. 清空主窗口的全局缓存
-                self.asset_files = [] 
-                self.selected_folders = []
+            # 1. 直接让管家加载（管家内部已适配单图/文件夹/bgs）
+            bundle = manager.load_from_file(path) or manager.load_from_folder(path)
+            
+            if bundle:
+                # 2. 编辑器模式下，我们通常希望它是唯一的
+                # 我们可以先清空仓库，确保编辑器里只操作这一个素材
+                manager._storage.clear() 
+                manager.register_asset(bundle)
                 
-                # 2. 调用编辑器的显示逻辑（它内部已经有了你要求的严格清理）
-                self.editor_page.display_image(path)
+                # 3. 通知编辑器（这里后面我们要改 ManualEditor 接收 bundle）
+                # self.editor_page.load_bundle(bundle) 
                 
-                # 3. 同步主窗口列表数据
-                self.asset_files.append(path)
+                # 临时兼容旧逻辑
+                if not os.path.isdir(path):
+                    self.editor_page.display_image(path)
                 
-                # 4. 打印一个干净的日志
-                self.console.clear() 
-                self.add_log(f"-> 编辑器已重载新素材: {os.path.basename(path)}", "#a6e3a1")
-                break # 编辑器模式通常一次只处理一张大图
+                self.add_log(f"-> 编辑器已重载素材: {bundle.name}", "#a6e3a1")
+        
+        # 如果是 Console 模式，执行“追加”逻辑
+        else:
+            for url in urls:
+                path = url.toLocalFile()
+                # 自动尝试从文件或文件夹加载
+                bundle = manager.load_from_file(path) or manager.load_from_folder(path)
                 
-            # 否则执行原本的追加逻辑（普通 Console 模式）
-            elif os.path.isdir(path):
-                self.process_import_path(path)
-            elif path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                if path not in self.asset_files:
-                    self.asset_files.append(path)
-                    self.add_log(f"-> 已载入图片: {os.path.basename(path)}", "#89b4fa")
-                else:
-                    self.add_log(f"-> 提示: 该图片已在列表中", "#f38ba8")
-
+                if bundle:
+                    # 注册入库，自动查重名
+                    final_name = manager.register_asset(bundle)
+                    self.add_log(f"-> 已载入资源: {final_name}", "#89b4fa")
+            
+            # 暂时注释掉报错行，稍后处理
+            # self.preview_panel.asset_tree.refresh_from_manager()
+    def add_log(self, message, color="#abb2bf"):
+        """统一的日志输出方法"""
+        from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+        
+        cursor = self.console.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        cursor.setCharFormat(fmt)
+        
+        cursor.insertText(f"{message}\n")
+        self.console.setTextCursor(cursor)
+        self.console.ensureCursorVisible()

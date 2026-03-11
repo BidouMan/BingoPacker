@@ -2,121 +2,111 @@ import os
 import json
 import zipfile
 import hashlib
-from PIL import Image
+from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QBuffer, QIODevice
+from .asset_manager import AssetManager
 
 class ExportLogic:
+    def _get_export_save_path(self, bundle, extension):
+        """
+        核心路径逻辑：确保导出文件与原始资源在同级目录
+        """
+        if bundle.path:
+            # 无论 path 是文件夹还是文件，os.path.dirname 都会指向它的父目录
+            # rstrip(os.sep) 是为了防止路径末尾带有斜杠导致 dirname 返回错误
+            parent_dir = os.path.dirname(bundle.path.rstrip(os.sep))
+            save_path = os.path.join(parent_dir, f"{bundle.name}{extension}")
+        else:
+            # 如果是纯内存创建的，放在程序运行目录
+            save_path = os.path.join(os.getcwd(), f"{bundle.name}{extension}")
+        
+        return os.path.abspath(save_path)
+
     def on_export_sprite3(self):
-        """
-        修正版：增加 SVG 兼容支持，动态计算 Scratch 锚点
-        """
-        if not self.selected_folders:
-            self.add_log("⚠️ 请先导入资源文件夹", "#ff5555")
+        manager = AssetManager()
+        asset_names = manager.list_assets()
+        
+        if not asset_names:
+            self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")
             return
 
-        for folder_path in self.selected_folders:
-            folder_name = os.path.basename(folder_path)
-            save_path = f"{folder_path}.sprite3"
+        for name in asset_names:
+            bundle = manager.get_asset(name)
+            # 使用新的路径算法
+            save_path = self._get_export_save_path(bundle, ".sprite3")
 
             try:
-                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.svg')
-                files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-                files.sort()
-                if not files: continue
-
                 with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     costumes = []
-                    
-                    for f_name in files:
-                        file_path = os.path.join(folder_path, f_name)
-                        ext = os.path.splitext(f_name)[1].lower().replace('.', '')
-                        
-                        # --- 核心修复：分流处理 SVG 和位图 ---
-                        if ext == 'svg':
-                            # SVG 默认分辨率为 1，锚点通常设为 0 (Scratch 自动处理矢量中心)
-                            bitmap_res = 1
-                            center_x, center_y = 0, 0
-                        else:
-                            # 位图分辨率通常为 2，使用 PIL 获取宽高计算中心
-                            bitmap_res = 2
-                            with Image.open(file_path) as img:
-                                width, height = img.size
-                            center_x = width / 2
-                            center_y = height / 2
-
-                        # 计算 MD5
-                        with open(file_path, 'rb') as f:
-                            file_data = f.read()
-                            md5_hash = hashlib.md5(file_data).hexdigest()
-                        
+                    for frame in bundle.frames:
+                        pix_data = self._pixmap_to_bytes(frame.pixmap)
+                        md5_hash = hashlib.md5(pix_data).hexdigest()
+                        ext = "png"
                         md5_filename = f"{md5_hash}.{ext}"
                         
                         costumes.append({
-                            "name": os.path.splitext(f_name)[0],
-                            "bitmapResolution": bitmap_res, 
+                            "name": frame.name if frame.name else bundle.name,
+                            "bitmapResolution": 2, 
                             "dataFormat": ext,
                             "assetId": md5_hash,
                             "md5ext": md5_filename,
-                            "rotationCenterX": center_x, 
-                            "rotationCenterY": center_y
+                            "rotationCenterX": frame.pixmap.width() / 2, 
+                            "rotationCenterY": frame.pixmap.height() / 2
                         })
-                        
-                        # 将文件存入压缩包，名字改为 MD5 名
-                        zipf.write(file_path, md5_filename)
+                        zipf.writestr(md5_filename, pix_data)
 
-                    # 构造 sprite.json
                     sprite_data = {
                         "isStage": False,
-                        "name": folder_name,
-                        # 增加 segments 字段，确保导入 AssetTree 时显示“动画”而非 0-10
-                        "segments": [{"name": "动画", "start": 1, "end": len(files)}], 
-                        "variables": {},
-                        "lists": {},
-                        "broadcasts": {},
-                        "blocks": {},
-                        "comments": {},
-                        "currentCostume": 0,
+                        "name": bundle.name,
+                        "segments": bundle.segments, 
                         "costumes": costumes,
-                        "sounds": [],
-                        "volume": 100,
-                        "visible": True,
-                        "x": 0,
-                        "y": 0,
-                        "size": 100,
-                        "direction": 90,
-                        "draggable": False,
-                        "rotationStyle": "all around"
+                        "currentCostume": 0,
+                        "sounds": [], "variables": {}, "lists": {}, "broadcasts": {}, "blocks": {}, "comments": {},
+                        "volume": 100, "visible": True, "x": 0, "y": 0, "size": 100, "direction": 90,
+                        "draggable": False, "rotationStyle": "all around"
                     }
-                    
                     zipf.writestr("sprite.json", json.dumps(sprite_data, indent=4, ensure_ascii=False))
 
-                self.add_log(f"-> 成功导出 .sprite3: {folder_name}", "#E48E51")
+                self.add_log(f"-> 导出成功: {os.path.basename(save_path)}", "#E48E51")
             except Exception as e:
-                self.add_log(f"⚠️ 导出失败: {str(e)}", "#ff5555")
+                self.add_log(f"⚠️ 导出失败 [{bundle.name}]: {str(e)}", "#ff5555")
 
     def on_export_bgs(self):
-        """BGS 保持原样，因为它不需要 MD5 转换"""
-        if not self.selected_folders:
-            self.add_log("⚠️ 请先导入资源文件夹", "#ff5555")
+        manager = AssetManager()
+        asset_names = manager.list_assets()
+        
+        if not asset_names:
+            self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")
             return
 
-        for folder_path in self.selected_folders:
-            folder_name = os.path.basename(folder_path)
-            save_path = f"{folder_path}.bgs"
+        for name in asset_names:
+            bundle = manager.get_asset(name)
+            # 使用新的路径算法
+            save_path = self._get_export_save_path(bundle, ".bgs")
+
             try:
-                valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp','.svg')
-                files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-                files.sort()
                 with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    frame_files = []
+                    for i, frame in enumerate(bundle.frames):
+                        f_name = f"frame_{i:03d}.png"
+                        pix_data = self._pixmap_to_bytes(frame.pixmap)
+                        zipf.writestr(f_name, pix_data)
+                        frame_files.append(f_name)
+
                     config = {
-                            "name": folder_name, 
-                            "count": len(files), 
-                            "frames": files,
-                            "segments": [{"name": "动画", "start": 1, "end": len(files)}] # 新增：默认片段
-                        }
-                    
+                        "name": bundle.name, 
+                        "count": len(bundle.frames), 
+                        "frames": frame_files,
+                        "segments": bundle.segments
+                    }
                     zipf.writestr("config.json", json.dumps(config, indent=4))
-                    for f_name in files:
-                        zipf.write(os.path.join(folder_path, f_name), f_name)
-                self.add_log(f"-> 成功导出 .bgs: {folder_name}", "#5CD59B")
+
+                self.add_log(f"-> 导出成功: {os.path.basename(save_path)}", "#5CD59B")
             except Exception as e:
-                self.add_log(f"⚠️ 导出失败: {str(e)}", "#ff5555")
+                self.add_log(f"⚠️ 导出失败 [{bundle.name}]: {str(e)}", "#ff5555")
+
+    def _pixmap_to_bytes(self, pixmap):
+        byte_array = QBuffer()
+        byte_array.open(QIODevice.WriteOnly)
+        pixmap.save(byte_array, "PNG")
+        return byte_array.data().data()
