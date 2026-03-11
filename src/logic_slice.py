@@ -232,7 +232,7 @@ class SliceLogic:
         return self.run_manual_slice(mock_bg_item, final_sorted_rects)
 
     def update_fixed_bar(self, percent, is_init=False):
-        bar_width = 8
+        bar_width = 20
         filled_count = int(bar_width * (percent / 100))
         bar_content = "━" * filled_count + "─" * (bar_width - filled_count)
         progress_text = f"-> {bar_content} [{percent:>6.1f}%]"

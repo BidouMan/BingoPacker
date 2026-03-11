@@ -22,9 +22,20 @@ class ExportLogic:
         
         return os.path.abspath(save_path)
 
-    def on_export_sprite3(self):
+    def on_export_sprite3(self,target_name=None):
         manager = AssetManager()
-        asset_names = manager.list_assets()
+
+        if target_name is None:
+            # 判定当前是否在编辑器页面 (Index 1)
+            if hasattr(self, 'left_stack') and self.left_stack.currentIndex() == 1:
+                # 只获取当前编辑器里的资产包名字
+                if hasattr(self, 'editor_page') and self.editor_page.current_bundle:
+                    target_name = self.editor_page.current_bundle.name
+
+        if target_name:
+            asset_names = [target_name]
+        else:
+            asset_names = manager.list_assets()
         
         if not asset_names:
             self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")
@@ -71,9 +82,17 @@ class ExportLogic:
             except Exception as e:
                 self.add_log(f"⚠️ 导出失败 [{bundle.name}]: {str(e)}", "#ff5555")
 
-    def on_export_bgs(self):
+    def on_export_bgs(self,target_name=None):
         manager = AssetManager()
-        asset_names = manager.list_assets()
+        
+        # --- 逻辑分流 ---
+        if target_name:
+            asset_names = [target_name]
+            print(f">>> [Export Debug] 最终导出名单: {asset_names}")
+        else:
+            asset_names = manager.list_assets()
+            print(f">>> [Export Debug] 执行批量导出，总数: {len(asset_names)}")
+      
         
         if not asset_names:
             self.add_log("⚠️ 仓库中没有可导出的资源", "#ff5555")

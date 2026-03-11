@@ -59,6 +59,10 @@ class ManualEditor(QWidget, EditorUI):
         self.current_source_path = file_path
         self.frame_list.blockSignals(True)
         self.scene.clear()
+
+        self.preview_item = None 
+        self.pixmap_item = None
+
         self.frame_list.clear()
         self.current_frames = []
 
@@ -109,9 +113,19 @@ class ManualEditor(QWidget, EditorUI):
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
         if self.current_frames:
+            if self.current_bundle:
+                from ...asset_model import FrameData # 确保已导入
+                self.current_bundle.frames = [
+                    FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}") 
+                    for i, f in enumerate(self.current_frames)
+                ]
             # 1. 彻底清理旧状态
-            if self.preview_item:
-                self.scene.removeItem(self.preview_item)
+            if self.preview_item:        
+                try:
+                    self.scene.removeItem(self.preview_item)
+                except RuntimeError:
+                    # 如果已经因为 scene.clear() 被删除了，直接跳过即可
+                    pass
                 self.preview_item = None
             
             # 隐藏底图

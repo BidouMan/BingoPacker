@@ -153,11 +153,31 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
 
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
-        self.btn_bgs.clicked.connect(self.on_export_bgs)    
-        self.btn_sprite.clicked.connect(self.on_export_sprite3)
+        self.btn_bgs.clicked.connect(self.handle_export_bgs_request)    
+        self.btn_sprite.clicked.connect(self.handle_export_sprite_request)
 
         self.editor_page.slice_completed.connect(self.preview_panel.asset_tree.add_editor_source)
 
+    def handle_export_sprite_request(self):
+        """同理处理 sprite3"""
+        target = None
+        if self.left_stack.currentIndex() == 1:
+            if self.editor_page.current_bundle:
+                target = self.editor_page.current_bundle.name
+        self.on_export_sprite3(target_name=target)
+
+    def handle_export_bgs_request(self):
+        """中转判定：根据当前 UI 页面决定导出的范围"""
+        target = None
+        
+        # 判定：如果当前在编辑器页面 (Index 1)
+        if self.left_stack.currentIndex() == 1:
+            if self.editor_page.current_bundle:
+                target = self.editor_page.current_bundle.name
+                print(f">>> [UI Check] 当前在编辑器，锁定目标: {target}")
+        
+        # 显式传递 target，彻底解决 logic 层猜不到的问题
+        self.on_export_bgs(target_name=target)
 
     def on_clear_content(self):
         """
