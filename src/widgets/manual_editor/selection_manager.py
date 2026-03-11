@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem, QGraphicsItem, QGraphicsPixmapItem
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem, QGraphicsView, QGraphicsPixmapItem
 from PySide6.QtCore import Qt, QRectF, QPointF,QRect
 from PySide6.QtGui import QPen, QColor, QPainterPath, QPainter, QBitmap, QPixmap,QRegion # 确保 QPainter 在这里
 
@@ -31,6 +31,25 @@ class SelectionManager:
 
     def set_active(self, active):
         self.active = active
+
+        # 强制更新光标
+        if self.scene.views():
+            view = self.scene.views()[0]
+            if active:
+                # 使用 QGraphicsView.NoDrag
+                view.setDragMode(QGraphicsView.NoDrag)  
+                view.setCursor(Qt.CrossCursor) # 变成十字光标
+            else:
+                # 使用 QGraphicsView.ScrollHandDrag
+                view.setDragMode(QGraphicsView.ScrollHandDrag) 
+                view.unsetCursor()
+        
+        # 如果不开启，清除临时的拉框残留
+        if not active:
+            self.start_point = None
+            if self.temp_rect:
+                self.scene.removeItem(self.temp_rect)
+                self.temp_rect = None
 
     def _snap_to_pixel(self, pos):
         return QPointF(round(pos.x()), round(pos.y()))
@@ -82,8 +101,15 @@ class SelectionManager:
         # --- 2. 正常框选逻辑 ---
         self.start_point = self._snap_to_pixel(scene_pos)
         self.temp_rect = QGraphicsRectItem()
-        self.temp_rect.setPen(self.dash_pen_add)
-        self.temp_rect.setData(0, "add")
+        
+        # --- 修复点：判断是否按下了 Alt 键进入减选模式 ---
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            self.temp_rect.setPen(self.dash_pen_remove) # 使用红色的虚线
+            self.temp_rect.setData(0, "remove")        # 设置为减选模式
+        else:
+            self.temp_rect.setPen(self.dash_pen_add)    # 使用蓝色的虚线
+            self.temp_rect.setData(0, "add")
+            
         self.scene.addItem(self.temp_rect)
 
     def _update_background_mask(self, bg_item):
@@ -301,7 +327,6 @@ class SelectionManager:
         if item in self.selections:
             # 1. 检查是否有移动过的像素贴图层
             if hasattr(item, 'pix_overlay') and item.pix_overlay:
-                print(f"DEBUG: 检测到选区移动，准备合并像素...")
                 self._merge_back_to_bg(item)
             
             # 2. 从管理列表移除
@@ -332,7 +357,7 @@ class SelectionManager:
         # 2. 计算合并后的并集区域
         combined_rect = bg_rect.united(overlay_rect)
         
-        print(f"DEBUG: 原始底图大小:{bg_rect.width()}x{bg_rect.height()}, 合并后目标大小:{combined_rect.width()}x{combined_rect.height()}")
+        # print(f"DEBUG: 原始底图大小:{bg_rect.width()}x{bg_rect.height()}, 合并后目标大小:{combined_rect.width()}x{combined_rect.height()}")
 
         # 3. 创建足以容纳两者的新画布
         new_bg_pix = QPixmap(combined_rect.size())

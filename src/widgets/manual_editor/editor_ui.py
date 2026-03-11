@@ -44,7 +44,9 @@ class EditorUI:
 
         self.btn_save = self._create_tool_btn("btn_save", "保存")
         self.btn_pick = self._create_tool_btn("btn_pick", "选取", checkable=True)
+        self.btn_pick.setCheckable(True)
         self.btn_slice = self._create_tool_btn("on_slice_clicked", "裁切", checkable=True)
+        self.btn_slice.setCheckable(True)
         self.btn_clear = QPushButton("清空")
 
         self.tool_group = QButtonGroup(widget)

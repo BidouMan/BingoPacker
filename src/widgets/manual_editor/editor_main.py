@@ -29,6 +29,9 @@ class ManualEditor(QWidget, EditorUI):
         self.canvas_layout.addWidget(self.view)
         
         self.selection_manager = SelectionManager(self.scene)
+        # self.selection_manager = SelectionManager(self.scene)
+        # 把 manager 引用塞进 view 里面，否则 view 里的 hasattr(self, 'selection_manager') 永远是 False
+        self.view.selection_manager = self.selection_manager
         self.setAcceptDrops(True)
         self.connect_signals()
 

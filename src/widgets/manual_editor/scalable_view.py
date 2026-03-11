@@ -1,10 +1,14 @@
 from PySide6.QtWidgets import QGraphicsView, QGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPoint
 from PySide6.QtGui import QPainter, QColor, QBrush, QTransform, QPixmap, QDragEnterEvent, QDropEvent, QWheelEvent, QMouseEvent
+from .selection_manager import SelectionManager
 
 class ScalableView(QGraphicsView):
     def __init__(self, scene):
         super().__init__(scene)
+
+        self.selection_manager = SelectionManager(self.scene)
+
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
@@ -46,29 +50,73 @@ class ScalableView(QGraphicsView):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.scale(factor, factor)
 
-    def mousePressEvent(self, event: QMouseEvent):
+    # scalable_view.py
+
+    def mousePressEvent(self, event):
+        # 1. 中键平移逻辑
         if event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = True
             self._last_mouse_pos = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
-        else:
-            super().mousePressEvent(event)
+            return
 
-    def mouseMoveEvent(self, event: QMouseEvent):
+        # 2. 选取模式转发
+        if hasattr(self, 'selection_manager') and self.selection_manager.active:
+            if event.button() == Qt.MouseButton.LeftButton:
+                # 转换坐标并提取修饰键
+                scene_pos = self.mapToScene(event.pos())
+                modifiers = event.modifiers()
+                # 调用你代码中真实的名字：handle_press
+                self.selection_manager.handle_press(scene_pos, modifiers)
+                return 
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        # 中键平移逻辑
         if self._is_panning:
             delta = event.pos() - self._last_mouse_pos
             self._last_mouse_pos = event.pos()
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-        else:
-            super().mouseMoveEvent(event)
+            return
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
+        # 选取模式转发
+        if hasattr(self, 'selection_manager') and self.selection_manager.active:
+            # 转换坐标
+            scene_pos = self.mapToScene(event.pos())
+            # 调用你代码中真实的名字：handle_move
+            self.selection_manager.handle_move(scene_pos)
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        # 中键平移结束
         if event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = False
-            self.setCursor(Qt.ArrowCursor)
-        else:
-            super().mouseReleaseEvent(event)
+            cursor = Qt.CrossCursor if (hasattr(self, 'selection_manager') and self.selection_manager.active) else Qt.ArrowCursor
+            self.setCursor(cursor)
+            return
+
+        # 选取模式转发
+        if hasattr(self, 'selection_manager') and self.selection_manager.active:
+            if event.button() == Qt.MouseButton.LeftButton:
+                # 转换坐标并提取修饰键
+                scene_pos = self.mapToScene(event.pos())
+                modifiers = event.modifiers()
+                # 调用你代码中真实的名字：handle_release
+                self.selection_manager.handle_release(scene_pos, modifiers)
+                return
+
+        super().mouseReleaseEvent(event)
+    
+    def mouseDoubleClickEvent(self, event):
+        if hasattr(self, 'selection_manager') and self.selection_manager.active:
+            scene_pos = self.mapToScene(event.pos())
+            self.selection_manager.handle_double_click(scene_pos)
+            return
+        super().mouseDoubleClickEvent(event)
 
 class CheckerboardItem(QGraphicsItem):
     def __init__(self, rect=QRectF()):
