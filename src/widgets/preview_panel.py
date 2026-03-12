@@ -270,10 +270,41 @@ class PreviewPanel(QFrame):
         if os.path.exists(path): self.btns["play"].setIcon(QIcon(path))
 
     def toggle_bg_color(self):
-        # ... (此处逻辑与你源码中的 toggle_bg_color 完全一致，包含所有 QSS 字符串) ...
+        """仅切换预览区域和滑块槽的背景颜色"""
         self.is_white_bg = not self.is_white_bg
-        # (由于篇幅，建议直接粘贴你源码中该函数的实现体)
-        # 关键是保留你源码中 bg_color, slider_groove 等变量名和十六进制值
+        
+        if self.is_white_bg:
+            # 白色模式：屏幕变白，滑块槽变浅色半透明以保持可见
+            bg_color = "#FFFFFF"
+            slider_groove = "rgba(0, 0, 0, 40)" 
+        else:
+            # 深色模式：恢复初始颜色
+            bg_color = "#1F2125"
+            slider_groove = "rgba(49, 50, 68, 180)"
+
+        # 1. 只改预览屏幕的背景色 (使用你代码中的 preview_screen)
+        self.preview_screen.setStyleSheet(f"""
+            background-color: {bg_color}; 
+            border: 1px solid #3e4451; 
+            border-radius: 8px;
+        """)
+
+        # 2. 只改滑块的槽背景 (否则白底上看不见原来的深色槽)
+        self.speed_slider.setStyleSheet(f"""
+            QSlider {{ background: transparent; border: none; }}
+            QSlider::groove:horizontal {{ 
+                background: {slider_groove}; 
+                height: 4px; 
+                border-radius: 2px; 
+            }}
+            QSlider::handle:horizontal {{ 
+                background: #89b4fa; 
+                width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; 
+            }}
+        """)
+        
+        # 3. 立即重绘当前帧
+        self.render_current_frame()
 
     def toggle_scale_mode(self):
         self.is_original_size = not self.is_original_size
