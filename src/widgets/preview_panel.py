@@ -45,7 +45,7 @@ class PreviewPanel(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 15, 12, 15)
+        layout.setContentsMargins(12, 12, 12, 4)
         layout.setSpacing(10)
 
         # --- 2. 标题 (完全还原) ---
@@ -121,17 +121,17 @@ class PreviewPanel(QFrame):
         tree_layout.addWidget(self.asset_tree)
 
         # --- 7. 右下角悬浮按钮 (完全还原) ---
-        self.float_ctrl = QWidget(self.tree_container)
-        self.float_ctrl.setFixedSize(60, 32)
-        float_layout = QHBoxLayout(self.float_ctrl)
-        float_layout.setContentsMargins(0, 0, 0, 0)
-        float_layout.setSpacing(4)
+        # self.float_ctrl = QWidget(self.tree_container)
+        # self.float_ctrl.setFixedSize(60, 32)
+        # float_layout = QHBoxLayout(self.float_ctrl)
+        # float_layout.setContentsMargins(0, 0, 0, 0)
+        # float_layout.setSpacing(4)
 
-        self.btn_tree_upload = self.make_float_btn("btn_upload")
-        self.btn_clear_list = self.make_float_btn("btn_clear_list")
+        # self.btn_tree_upload = self.make_float_btn("btn_upload")
+        # self.btn_clear_list = self.make_float_btn("btn_clear_list")
         
-        float_layout.addWidget(self.btn_tree_upload)
-        float_layout.addWidget(self.btn_clear_list)
+        # float_layout.addWidget(self.btn_tree_upload)
+        # float_layout.addWidget(self.btn_clear_list)
         
         layout.addWidget(self.tree_container, 1)
 
@@ -216,8 +216,8 @@ class PreviewPanel(QFrame):
         self.btns["play"].clicked.connect(self.toggle_play)
         self.btns["prev"].clicked.connect(lambda: self.manual_step(-1))
         self.btns["next"].clicked.connect(lambda: self.manual_step(1))
-        self.btn_tree_upload.clicked.connect(self.on_upload_clicked)
-        self.btn_clear_list.clicked.connect(self.on_clear_clicked)
+        # self.btn_tree_upload.clicked.connect(self.on_upload_clicked)
+        # self.btn_clear_list.clicked.connect(self.on_clear_clicked)
         self.speed_slider.valueChanged.connect(self.update_play_speed)
         self.btns["btn_bg_color"].clicked.connect(self.toggle_bg_color)
         self.btns["btn_scale_mode"].clicked.connect(self.toggle_scale_mode)

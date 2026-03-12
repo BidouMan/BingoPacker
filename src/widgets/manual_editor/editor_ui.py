@@ -37,7 +37,7 @@ class EditorUI:
 
         # 顶部工具栏
         self.toolbar = QFrame()
-        self.toolbar.setFixedHeight(40)
+        self.toolbar.setFixedHeight(35)
         toolbar_layout = QHBoxLayout(self.toolbar)
         toolbar_layout.setContentsMargins(5, 0, 5, 0)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)

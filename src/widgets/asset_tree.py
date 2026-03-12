@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon
 
 class AssetTree(QTreeWidget):
-    segment_changed = Signal(object, dict) # (AssetBundle, segment_dict)
+    segment_changed = Signal(object, dict) 
 
     def __init__(self, parent=None):
         super().__init__(parent)

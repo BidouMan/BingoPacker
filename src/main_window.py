@@ -36,11 +36,10 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
             QTextEdit { 
                 background-color: #21252b; 
                 border: 1px solid #181a1f; 
-                border-radius: 8px; 
                 padding: 10px; 
                 color: #abb2bf;
                 font-family: 'Consolas', 'Monaco', 'Microsoft YaHei', monospace;
-                font-size: 13px;
+                font-size: 14px;
             }
             QPushButton { 
                 background-color: #353b45; 
@@ -85,7 +84,7 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         
-        self.console.setPlaceholderText("- Drag and drop assets here...")
+        self.console.setPlaceholderText("-> 批量导入资源...")
         # 控制台文本颜色微调，更具代码感
         self.console.setStyleSheet("""
             QTextEdit { 
@@ -127,7 +126,7 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.btn_bgs = self.make_btn("导出 .bgs", "#45b573", "#58ce87")
         self.btn_sprite = self.make_btn("导出 .sprite3", "#d9793d", "#e68a4d")
 
-        for b in [self.btn_upload, self.btn_clear, self.btn_editor,self.btn_slice]:
+        for b in [self.btn_upload, self.btn_clear,self.btn_slice,self.btn_editor]:
             btn_layout.addWidget(b)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_bgs)
