@@ -33,11 +33,27 @@ class EditorUI:
 
             /* --- 仅为新组件添加必要的样式，不触碰原有组件 --- */
             QSlider::groove:horizontal { border: 1px solid #181a1f; height: 4px; background: #353b45; border-radius: 2px; }
-            QSlider::handle:horizontal { background: #61afef; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
-            QCheckBox::indicator { width: 16px; height: 16px; background-color: #353b45; border: 1px solid #181a1f; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #89b4fa; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+            
+            QCheckBox::indicator { 
+                width: 14; 
+                height: 14; 
+                background-color: #353b45; 
+                border: 1px solid #181a1f; 
+                border-radius: 3px; 
+                /* 核心：在默认状态就预留好 padding，防止切换时尺寸抖动 */
+                padding: 2px; 
+            }
+
+            QCheckBox::indicator:hover { 
+                background-color: #3e4451; 
+            }
+
+            /* 2. 选中状态只改背景和图片，不改尺寸相关属性 */
             QCheckBox::indicator:checked { 
-                background-color: #61afef; 
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yMCA2TDkgMTdsLTUtNSIvPjwvc3ZnPg==);
+                background-color: #89b4fa; 
+                /* 引用你的 SVG */
+                image: url(assets/icons/magic_wand_select.svg);
             }
         """)
 
