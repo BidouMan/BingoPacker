@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem, QGraphicsView, QGraphicsPixmapItem
 from PySide6.QtCore import Qt, QRectF, QPointF,QRect
-from PySide6.QtGui import QPen, QColor, QPainterPath, QPainter, QBitmap, QPixmap,QRegion # 确保 QPainter 在这里
+from PySide6.QtGui import QPen, QColor, QPainterPath, QPainter, QBitmap, QPixmap,QRegion,QIcon # 确保 QPainter 在这里
 
 class SelectionManager:
     def __init__(self, scene):
@@ -9,6 +9,7 @@ class SelectionManager:
         self.temp_rect = None
         self.start_point = None
         self.active = False
+        
         
         # --- 必须在这里初始化新添加的变量 ---
         self.moving_item = None        # 当前正在移动的选区项
@@ -254,14 +255,34 @@ class SelectionManager:
         else:
             self.clear_selections()
 
-    def clear_selections(self):
+    # selection_manager.py
+
+    # selection_manager.py
+
+    def clear_selections(self, target_frame_data=None):
         """
-        清空所有选区，但在清空前将移动后的图像合并到底图
+        物理清理所有选区。
+        target_frame_data: 如果传入，则强制合并到这个数据对象中，解决切换帧时的“时差”问题。
         """
-        # 必须先复制一份列表，因为 _remove_item 会修改 self.selections
-        for item in list(self.selections):
-            self._remove_item(item)
+        if not self.selections:
+            return
+
+        # 找到当前可见的底图
+        bg_item = next((i for i in self.scene.items() 
+                       if isinstance(i, QGraphicsPixmapItem) and i.isVisible() and not hasattr(i, 'is_clone')), None)
+
+        for item in self.selections[:]:
+            # 执行合并逻辑
+            # 注意：如果 target_frame_data 为空，它内部会去猜 currentRow，所以我们建议在 editor 切换时必传
+            self._merge_back_to_bg(item, target_frame_data=target_frame_data)
+            
+            # 从场景物理移除
+            if item.scene():
+                self.scene.removeItem(item)
+        
         self.selections.clear()
+        self.moving_item = None
+        self.active = False
     
     def _apply_transparent_holes(self, bg_item):
         """
@@ -336,15 +357,74 @@ class SelectionManager:
             if item.scene():
                 self.scene.removeItem(item)
 
-    def _merge_back_to_bg(self, item):
+    def handle_key_nudge(self, key, is_boost=False):
+        """键盘位移：仅操作图元，不触发物理合并"""
+        if not self.active: return
+        
+        target = self.moving_item
+        if not target:
+            valid_selections = [s for s in self.selections if s.scene()]
+            if valid_selections:
+                target = valid_selections[-1] 
+        if not target: return
+
+        # 1. 只有第一次位移时，执行抠图 (Data 10 记录了原始区域)
+        if not hasattr(target, 'pix_overlay') or target.pix_overlay is None:
+            bg_item = next((i for i in self.scene.items() 
+                           if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+            if bg_item:
+                scene_rect = target.sceneBoundingRect()
+                local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
+                local_rect = QRect(local_top_left, scene_rect.size().toSize())
+                
+                target.setData(10, local_rect) 
+                crop_pix = bg_item.pixmap().copy(local_rect)
+                self._permanently_erase_pixels(bg_item, local_rect) # 挖空底图
+                
+                overlay = QGraphicsPixmapItem(crop_pix)
+                overlay.is_clone = True
+                overlay.setParentItem(target) 
+                overlay.setZValue(-1) 
+                overlay.setPos(target.boundingRect().topLeft())
+                target.pix_overlay = overlay
+
+        # 2. 执行物理位移 (dx, dy)
+        step = 10 if is_boost else 1
+        dx, dy = 0, 0
+        if key == Qt.Key_Left:    dx = -step
+        elif key == Qt.Key_Right: dx = step
+        elif key == Qt.Key_Up:    dy = -step
+        elif key == Qt.Key_Down:  dy = step
+        
+        target.moveBy(dx, dy)
+        
+        # 3. 更新 Data(1) 累计位移量
+        curr_offset = target.data(1) or QPointF(0, 0)
+        target.setData(1, curr_offset + QPointF(dx, dy))
+        
+        self.scene.update()
+        # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
+
+    def _merge_back_to_bg(self, item, target_frame_data=None):
         """
-        物理合并逻辑：支持越界合并，并确保后续操作同步
+        物理合并：将悬浮像素焊死到底图。
+        修正：严格限制底图查找范围，防止抓取到已隐藏的原始素材。
         """
-        bg_item = next((i for i in self.scene.items() if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-        if not bg_item or not hasattr(item, 'pix_overlay') or not item.pix_overlay:
+        # 1. 寻找场景中的底图图元
+        # 增加条件：必须是可见的 (isVisible)！这样就不会抓到裁切后隐藏的原始大图
+        bg_item = next((i for i in self.scene.items() 
+                       if isinstance(i, QGraphicsPixmapItem) 
+                       and not hasattr(i, 'is_clone')
+                       and i.isVisible()), None)
+        
+        if not bg_item:
+            print("DEBUG [Selection]: 合并失败，未找到可见的底图")
+            return
+
+        if not hasattr(item, 'pix_overlay') or not item.pix_overlay:
             return
         
-        # 1. 获取位置信息
+        # 2. 获取位置和图像信息
         overlay = item.pix_overlay
         overlay_pix = overlay.pixmap()
         scene_pos = overlay.scenePos() 
@@ -353,42 +433,69 @@ class SelectionManager:
         current_bg_pix = bg_item.pixmap()
         bg_rect = current_bg_pix.rect()
         overlay_rect = QRect(local_pos, overlay_pix.size())
-
-        # 2. 计算合并后的并集区域
+        
+        # 3. 计算并集区域（处理越界）
         combined_rect = bg_rect.united(overlay_rect)
         
-        # print(f"DEBUG: 原始底图大小:{bg_rect.width()}x{bg_rect.height()}, 合并后目标大小:{combined_rect.width()}x{combined_rect.height()}")
-
-        # 3. 创建足以容纳两者的新画布
+        # 4. 绘制新画布
         new_bg_pix = QPixmap(combined_rect.size())
         new_bg_pix.fill(Qt.GlobalColor.transparent) 
         
         painter = QPainter(new_bg_pix)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        
-        # 4. 处理偏移绘制
         offset = -combined_rect.topLeft()
         
         painter.drawPixmap(offset, current_bg_pix)
         painter.drawPixmap(local_pos + offset, overlay_pix)
         painter.end()
         
-        # 5. 更新底图位置和图像
+        # 5. 更新显示
         new_scene_pos = bg_item.mapToScene(combined_rect.topLeft())
         bg_item.setPixmap(new_bg_pix)
         bg_item.setPos(new_scene_pos) 
-        
-        # --- 【核心修复同步点 1】 ---
-        # 必须更新底图内部存储的备份数据（Data 99），否则第二次操作会回滚到初始图
         bg_item.setData(99, new_bg_pix.copy()) 
-        
-        # --- 【核心修复同步点 2】 ---
-        # 清除当前选区记录的旧位置和旧像素层引用，防止干扰下一次操作
-        item.setData(10, None) 
-        item.pix_overlay = None
 
-        bg_item.update()
-        self.scene.update()
+        # --- 6. 寻找 Editor 实例进行数据同步 ---
+        view = self.scene.views()[0]
+        editor = view.parent()
+        while editor and not hasattr(editor, 'bundle_updated'):
+            editor = editor.parent()
+        
+        if editor:
+            # 优先使用显式传入的 target_frame_data
+            if target_frame_data is not None:
+                target_frame_data["pixmap"] = new_bg_pix
+            else:
+                # 否则使用当前选中的索引（注意：这里要确保 index 是切换前的 index）
+                idx = editor.frame_list.currentRow()
+                if 0 <= idx < len(editor.current_frames):
+                    editor.current_frames[idx]["pixmap"] = new_bg_pix
+            
+            # 触发编辑器同步到 AssetBundle 并通知预览面板
+            editor.sync_and_notify()
+    def _sync_to_editor_model(self, new_pix):
+        try:
+            view = self.scene.views()[0]
+            parent_widget = view.parent()
+            while parent_widget:
+                if parent_widget.__class__.__name__ == "ManualEditor":
+                    # --- 修复点：确保我们更新的是“合并前”的那一帧 ---
+                    # 如果有 selection_manager 在工作，我们应该相信此时场景里对应的那个 bundle 数据
+                    if parent_widget.current_bundle:
+                        # 找到当前正在预览的那个 index
+                        idx = parent_widget.frame_list.currentRow()
+                        if 0 <= idx < len(parent_widget.current_frames):
+                            parent_widget.current_frames[idx]["pixmap"] = new_pix
+                            
+                            # 更新列表左侧的缩略图 (解决预览不同步)
+                            icon_pix = new_pix.scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio)
+                            parent_widget.frame_list.item(idx).setIcon(QIcon(icon_pix))
+                            
+                            # 通知外部（预览窗口等）数据已变
+                            parent_widget.bundle_updated.emit(parent_widget.current_bundle)
+                    break
+                parent_widget = parent_widget.parent()
+        except Exception as e:
+            print(f"Sync error: {e}")
     
     def get_sorted_selections(self):
         """
@@ -449,3 +556,76 @@ class SelectionManager:
             final_sorted.extend([r['rect'] for r in current_row])
 
         return final_sorted
+    
+    def handle_key_nudge(self, key, is_boost=False):
+        """键盘位移：仅操作图元，不触发物理合并"""
+        if not self.active: return
+        
+        target = self.moving_item
+        if not target:
+            valid_selections = [s for s in self.selections if s.scene()]
+            if valid_selections:
+                target = valid_selections[-1] 
+        if not target: return
+
+        # 1. 只有第一次位移时，执行抠图 (Data 10 记录了原始区域)
+        if not hasattr(target, 'pix_overlay') or target.pix_overlay is None:
+            bg_item = next((i for i in self.scene.items() 
+                           if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+            if bg_item:
+                scene_rect = target.sceneBoundingRect()
+                local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
+                local_rect = QRect(local_top_left, scene_rect.size().toSize())
+                
+                target.setData(10, local_rect) 
+                crop_pix = bg_item.pixmap().copy(local_rect)
+                self._permanently_erase_pixels(bg_item, local_rect) # 挖空底图
+                
+                overlay = QGraphicsPixmapItem(crop_pix)
+                overlay.is_clone = True
+                overlay.setParentItem(target) 
+                overlay.setZValue(-1) 
+                overlay.setPos(target.boundingRect().topLeft())
+                target.pix_overlay = overlay
+
+        # 2. 执行物理位移 (dx, dy)
+        step = 10 if is_boost else 1
+        dx, dy = 0, 0
+        if key == Qt.Key_Left:    dx = -step
+        elif key == Qt.Key_Right: dx = step
+        elif key == Qt.Key_Up:    dy = -step
+        elif key == Qt.Key_Down:  dy = step
+        
+        target.moveBy(dx, dy)
+        
+        # 3. 更新 Data(1) 累计位移量
+        curr_offset = target.data(1) or QPointF(0, 0)
+        target.setData(1, curr_offset + QPointF(dx, dy))
+        
+        self.scene.update()
+        # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
+        # 不要在这里调用 _merge_back_to_bg
+
+    def _get_valid_selections(self):
+        """
+        寻找场景中所有的选区框（兼容矩形和路径项）。
+        """
+        from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem
+        valid = []
+        
+        # 获取场景中所有项
+        all_items = self.scene.items() 
+        for item in all_items:
+            # 同时检查 PathItem 和 RectItem
+            is_selection_type = isinstance(item, (QGraphicsPathItem, QGraphicsRectItem))
+            
+            if is_selection_type and item.isVisible():
+                # 排除掉掉那些被标记为像素层 (is_clone) 的对象
+                if not hasattr(item, 'is_clone'):
+                    # 额外检查：确保它属于我们管理的 selections 列表，或者是我们画的框
+                    if item in self.selections:
+                        valid.append(item)
+        
+        # 为了键盘操作能抓到“最新”的一个，我们按创建顺序倒序排列（selections 列表末尾是最新的）
+        # 或者直接返回 self.selections 中仍然在场景里的项
+        return [s for s in self.selections if s.scene()]

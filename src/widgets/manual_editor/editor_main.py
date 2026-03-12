@@ -1,6 +1,6 @@
 import os
 from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem,QGraphicsView
-from PySide6.QtCore import Qt, QRectF, Signal, QSize,QPoint
+from PySide6.QtCore import Qt, QRectF, Signal, QSize,QPoint,QRect,QPointF
 from PySide6.QtGui import QPixmap, QIcon, QPainter,QPainterPath,QColor,QPen,QRegion,QShortcut, QKeySequence,QCursor
 
 from .editor_ui import EditorUI
@@ -14,7 +14,8 @@ from .crop_tool import CropBoxItem
 
 class ManualEditor(QWidget, EditorUI):
     slice_completed = Signal(str, list)
-    bundle_updated = Signal(object)
+    # bundle_updated = Signal(object)
+    bundle_updated = Signal(object,dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,6 +30,7 @@ class ManualEditor(QWidget, EditorUI):
         # 撤销栈，存储 QPixmap 对象
         self.undo_stack = []
         self.max_undo_steps = 20
+        self.last_index = -1
         
         # 初始化 UI
         self.setup_ui(self)
@@ -52,7 +54,12 @@ class ManualEditor(QWidget, EditorUI):
         self.shortcut_backspace = QShortcut(QKeySequence(Qt.Key_Backspace), self)
         self.shortcut_backspace.activated.connect(self.delete_selected_pixels)
 
+        
         self.connect_signals()
+
+        self.frame_list.installEventFilter(self)
+        # 同时也给视图加上，确保点击画布后也能响应
+        self.view.installEventFilter(self)
 
     # --- 核心：数据驱动的属性拦截 ---
     @property
@@ -62,9 +69,11 @@ class ManualEditor(QWidget, EditorUI):
     @current_bundle.setter
     def current_bundle(self, bundle):
         self._current_bundle = bundle
-        # 只要 bundle 对象被重新赋值，立刻通知 AssetTree
-        if bundle:
-            self.bundle_updated.emit(bundle)
+        if hasattr(self, 'bundle_updated'):
+            # 修复点：发射两个参数。
+            # 如果没有 segment，传一个空字典 {}，防止报错
+            curr_seg = getattr(self, 'current_segment', {})
+            self.bundle_updated.emit(bundle, curr_seg)
 
     def connect_signals(self):
         # 确保 UI 中的所有按钮都正确绑定
@@ -81,6 +90,17 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_expand.clicked.connect(self.on_expand_selection)
         self.btn_shrink.clicked.connect(self.on_shrink_selection)
         self.btn_invert.clicked.connect(self.on_invert_selection)
+
+        # 其他工具
+        self.frame_list.currentRowChanged.connect(self.before_frame_changed)
+    
+    def before_frame_changed(self, new_row):
+        """
+        在真正切换显示之前，强制把旧帧的选区合并掉。
+        """
+        if hasattr(self, 'selection_manager') and self.selection_manager.selections:
+            # 此时 self.frame_list.currentRow() 还是旧的索引
+            self.selection_manager.clear_selections()
     
     def _on_tolerance_changed(self, value):
         """同步显示百分比并更新魔棒工具的内部容差值"""
@@ -186,83 +206,69 @@ class ManualEditor(QWidget, EditorUI):
 
     def on_do_slice(self):
         """
-        执行裁切并同步到预览
-        核心逻辑：原地更新模型数据，确保 AssetTree 和 PreviewPanel 的引用不丢失
+        最终版：执行裁切并同步到预览
+        解决：物理删除底图、重置按钮状态、重置选区状态
         """
-        # 1. 寻找画布上的底图（排除克隆体）
+        # 1. 寻找画布上的底图（排除选区克隆体）
         bg_item = next((i for i in self.scene.items() 
                     if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
         if not bg_item: 
             return
 
-        # self.save_undo_state() #存档
-
-        # 2. 执行裁切逻辑（手动或自动）
+        # 2. 执行裁切逻辑（获取矩形并生成新帧）
         rects = self.selection_manager.get_sorted_selections()
+        source_pixmap = bg_item.pixmap()
+
         if rects:
-            # 手动裁切：根据用户画的框
             self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
-            # 自动裁切：识别透明像素
-            self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
+            self.current_frames = self.slice_logic.run_auto_slice_to_preview(source_pixmap)
 
-        # 3. 如果裁切出了结果，开始同步数据模型
         if self.current_frames:
+            # --- 核心清理 A：彻底物理移除原始底图和选区管理器残留 ---
+            if bg_item.scene():
+                self.scene.removeItem(bg_item)
+            
+            # 这里调用的是强制重置，不涉及合并逻辑，因为底图都换了
+            self.selection_manager.selections.clear()
+            self.selection_manager.active = False
+            self.selection_manager.moving_item = None
+
+            # 3. 更新数据模型 (AssetBundle)
             if self.current_bundle:
-                # from ...asset_model import FrameData
                 new_max = len(self.current_frames)
-                
-                # A. 更新帧数据列表
                 self.current_bundle.frames = [
                     FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}") 
                     for i, f in enumerate(self.current_frames)
                 ]
-                
-                if not self.current_bundle.segments:
-                    self.current_bundle.segments.clear()
-                    self.current_bundle.segments.append({"name": "Default", "start": 1, "end": new_max})
-                else:
-                    # 必须强制更新 Default 片段的值
-                    for s in self.current_bundle.segments:
-                        if s['name'] == "Default":
-                            s['start'] = 1
-                            s['end'] = new_max
-                            print(f"DEBUG [Editor]: 已强制重置 Default 片段为 1-{new_max}")
+                # 更新片段范围
+                for s in self.current_bundle.segments:
+                    if s.get('name') == "Default":
+                        s['start'] = 1
+                        s['end'] = new_max
 
-                # C. 同步给全局
-                self.bundle_updated.emit(self.current_bundle)
-                
-                # D. 通知全局预览窗口 (MainWindow 会调用 preview_panel.start_segment_preview)
-                self._sync_after_slice()
-
-            # --- 4. UI 状态重置与画布渲染 ---
-            # 清理旧的预览 Item
-            if self.preview_item:        
-                try:
-                    self.scene.removeItem(self.preview_item)
-                except (RuntimeError, Exception):
-                    pass
-                self.preview_item = None
-            
-            # 隐藏原始底图，清理选择框
-            bg_item.setVisible(False)
-            self.selection_manager.clear_selections()
-            self.selection_manager.set_active(False)
-
-            # 强制刷新场景尺寸为第一帧的大小
-            first_pix = self.current_frames[0]["pixmap"]
-            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
-            self.scene.setSceneRect(new_rect)
-            
-            if hasattr(self.view, 'checker_item'):
-                self.view.checker_item.set_rect(new_rect)
-
-            # 刷新左侧帧列表 UI
+            # 4. 重置 UI 状态
             self.update_frame_list_ui()
+            
+            # 彻底销毁预览 Item 缓存
+            if self.preview_item and self.preview_item.scene():
+                self.scene.removeItem(self.preview_item)
+            self.preview_item = None
 
-            # 默认选中第一帧进行单帧预览
+            # 5. --- 核心修复：重置裁切按钮状态，使其可以再次点击 ---
+            self.btn_slice.setChecked(False) 
+            # 如果有状态栏更新，在这里调用一次
+            if hasattr(self, 'update_tool_status'):
+                self.update_tool_status()
+
+            # 6. 激活第一帧显示
+            self.last_index = -1  # 强制重置索引记录
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
+            
+            # 全局同步一次数据
+            self.sync_and_notify()
+            print(f"DEBUG: 裁切完成，已物理移除旧素材并重置工具状态。")
             
 
 
@@ -296,30 +302,57 @@ class ManualEditor(QWidget, EditorUI):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.frame_list.addItem(item)
 
+    # editor_main.py
+
     def switch_frame_preview(self, index):
-        """点击列表项时，在画布中间显示该帧"""
+        """点击列表项时，在画布中间显示该帧"""    
         if index < 0 or index >= len(self.current_frames): return
-        
+        # 如果点击的是当前正在显示的帧，不做任何操作
+        if index == self.last_index and self.last_index != -1: return
+
+        # --- 核心修复 A：在切换 index 之前，强制把旧帧的选区“焊死”在旧帧数据里 ---
+        if hasattr(self, 'selection_manager') and self.last_index != -1:
+            # 【关键点】我们显式告诉管理器：请把当前的选区合并到 last_index 对应的那个数据块里
+            # 而不是让它自己去猜当前是哪一帧
+            old_frame_data = self.current_frames[self.last_index]
+            self.selection_manager.clear_selections(target_frame_data=old_frame_data)
+            print(f"DEBUG: 切换前已将选区强制合并至旧帧索引: {self.last_index}")
+
+        # 更新当前索引记录
+        self.last_index = index
+
+        # --- 核心修复 B：物理清理场景，确保没有任何“脏 Item”残留到新场景 ---
+        for item in self.scene.items():
+            if item != self.view.checker_item:
+                self.scene.removeItem(item)
+        self.preview_item = None # 强制重建底图对象
+
+        # --- 正常的显示逻辑 ---
         pix = self.current_frames[index]["pixmap"]
         new_rect = QRectF(0, 0, pix.width(), pix.height())
-
-        # 调整场景大小以适应当前帧
         self.scene.setSceneRect(new_rect)
         if hasattr(self.view, 'checker_item'):
             self.view.checker_item.set_rect(new_rect)
 
-        # 管理预览 Item
         if self.preview_item is None:
             self.preview_item = QGraphicsPixmapItem()
             self.scene.addItem(self.preview_item)
         
         self.preview_item.setPixmap(pix)
         self.preview_item.setVisible(True)
-        # 保持像素清晰
-        self.preview_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+        self.preview_item.setPos(0, 0)
         
-        # 自动缩放画布查看该帧
         self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+        if self.btn_pick.isChecked():
+            self.selection_manager.set_active(True)
+            # 确保光标也对齐
+            self.view.setCursor(Qt.CrossCursor)
+        
+        self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self.sync_and_notify()
+        
+
 
     def on_save_clicked(self):
         """保存逻辑：集成 SliceLogic"""
@@ -794,24 +827,171 @@ class ManualEditor(QWidget, EditorUI):
             
         print(f"DEBUG: 已撤销，剩余步数: {len(self.undo_stack)}")
     
+    # selection_manager.py 中添加
+
+    # selection_manager.py 中添加
+
+    # def handle_key_nudge(self, key, is_boost=False):
+    #     if not self.active: return
+        
+    #     # 1. 寻找目标：优先用鼠标正在拽的，没有就抓场景里最新的
+    #     target = self.moving_item
+    #     if not target:
+    #         selections = self._get_valid_selections()
+    #         if selections:
+    #             target = selections[0] # 抓取最顶层的选区
+            
+    #     if not target:
+    #         print("DEBUG: 场景中未发现选区框，请确保已点击 btn_pick 并画了一个框")
+    #         return
+
+    #     # 2. 执行抠图初始化 (只需执行一次)
+    #     # 检查是否已经有了悬浮像素层
+    #     if not hasattr(target, 'pix_overlay') or target.pix_overlay is None:
+    #         # 找到主图层 (排除掉那些 clone 出来的)
+    #         bg_item = next((i for i in self.scene.items() 
+    #                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
+            
+    #         if bg_item:
+    #             print(f"DEBUG: 选区 {target} 首次移动，开始执行抠图...")
+    #             # 获取选区在场景中的位置
+    #             scene_rect = target.sceneBoundingRect()
+    #             # 转换到主图的本地坐标
+    #             local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
+    #             local_rect = QRect(local_top_left, scene_rect.size().toSize())
+                
+    #             # 保存原始区域信息，用于后续合并
+    #             target.setData(10, local_rect) 
+                
+    #             # 抠图并擦除原图对应区域
+    #             crop_pix = bg_item.pixmap().copy(local_rect)
+    #             self._permanently_erase_pixels(bg_item, local_rect)
+                
+    #             # 创建随框移动的像素层
+    #             overlay = QGraphicsPixmapItem(crop_pix)
+    #             overlay.is_clone = True
+    #             overlay.setParentItem(target) # 关键：让像素层成为框的子元素
+    #             overlay.setZValue(-1) 
+    #             overlay.setPos(target.boundingRect().topLeft())
+    #             target.pix_overlay = overlay
+    #             target.setBrush(self.add_color)
+
+    #     # 3. 计算并位移
+    #     step = 10 if is_boost else 1
+    #     dx, dy = 0, 0
+    #     if key == Qt.Key_Left: dx = -step
+    #     elif key == Qt.Key_Right: dx = step
+    #     elif key == Qt.Key_Up: dy = -step
+    #     elif key == Qt.Key_Down: dy = step
+        
+    #     # 移动选区框，子项 pix_overlay 会自动同步移动
+    #     target.moveBy(dx, dy)
+        
+    #     # 更新记录的位移差 (data(1))，确保 clear_selections 合并时位置正确
+    #     curr_offset = target.data(1) or QPointF(0, 0)
+    #     target.setData(1, curr_offset + QPointF(dx, dy))
+        
+    #     self.scene.update()
+    #     print(f"DEBUG: 选区已移动 {dx}, {dy}")
+
+
+
+
     def keyPressEvent(self, event):
         modifiers = event.modifiers()
-        is_ctrl = (modifiers & Qt.KeyboardModifier.ControlModifier) or \
-                  (modifiers & Qt.KeyboardModifier.MetaModifier)
+        is_ctrl = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        key = event.key()
 
-        # 1. 处理撤销 Ctrl+Z
-        if is_ctrl and event.key() == Qt.Key_Z:
-            self.undo()
+        # --- 修改点：统一使用 selection_manager 的逻辑 ---
+        if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            print(222)
+            # 如果是选择模式，调用选区微调
+            if self.btn_pick.isChecked():
+                print(111)
+                self.selection_manager.handle_key_nudge(key, is_shift)
+            else:
+                # 否则可以保留原有的 handle_pixel_nudge 或者不执行
+                self.handle_pixel_nudge(key, is_shift) 
+                print(333)
+            event.accept()
             return
 
-        # 2. 处理裁切模式下的快捷键
+        # 2. 撤销逻辑
+        if is_ctrl and key == Qt.Key_Z:
+            self.undo()
+            event.accept()
+            return
+
+        # 3. 裁切模式
         if hasattr(self, 'crop_box') and self.crop_box:
-            if event.key() == Qt.Key_Escape:
-                self.abort_crop_session() 
+            # ... 保持原样 ...
+            if key == Qt.Key_Escape: self.abort_crop_session(); return
+            if key in (Qt.Key_Return, Qt.Key_Enter): self.finish_crop_session(); return
+
+        # 4. 只有不按 Ctrl 的纯方向键，才用来切换帧
+        if not is_ctrl and key in (Qt.Key_Up, Qt.Key_Down):
+            # 如果焦点不在列表，手动帮它切换
+            if not self.frame_list.hasFocus():
+                row = self.frame_list.currentRow()
+                new_row = row - 1 if key == Qt.Key_Up else row + 1
+                if 0 <= new_row < self.frame_list.count():
+                    self.frame_list.setCurrentRow(new_row)
+                event.accept()
                 return
-            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                self.finish_crop_session() 
-                return
-        
-        # 3. 其他默认处理
+
         super().keyPressEvent(event)
+    
+    def eventFilter(self, source, event):
+        # 监控发往 列表 或 视图 的键盘按下事件
+        if event.type() == event.Type.KeyPress:
+            modifiers = event.modifiers()
+            is_ctrl = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+            key = event.key()
+
+            # 如果按下的是 Ctrl/Command + 方向键
+            if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+                print(f"DEBUG: 过滤器截获按键 {key}") # 这次一定会打印
+                
+                is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+                
+                # 逻辑分流
+                if self.btn_pick.isChecked():
+                    # 方案：调用 SelectionManager
+                    self.selection_manager.handle_key_nudge(key, is_shift)
+                else:
+                    # 方案：整体图像移动
+                    self.handle_pixel_nudge(key, is_shift)
+                
+                return True # 【关键】返回 True 表示拦截，不再传给列表，列表就不会切换帧了
+
+        return super().eventFilter(source, event)
+
+    def sync_and_notify(self):
+        """核心：强制将编辑器内的 Pixmap 覆盖到 Bundle 模型对象中"""
+        if not self.current_bundle or not self.current_frames:
+            return
+
+        # 1. 物理同步：遍历编辑器里的帧，强行覆盖 Bundle 里的 FrameData 对象
+        for i, frame_info in enumerate(self.current_frames):
+            # frame_info 是编辑器里的字典 {"pixmap": pix, "item": item}
+            if i < len(self.current_bundle.frames):
+                # 获取底层的 FrameData 实例
+                target_frame_obj = self.current_bundle.frames[i]
+                # 关键：更新该对象的 pixmap 引用
+                target_frame_obj.pixmap = frame_info["pixmap"]
+                
+                # 可选：同步更新列表左侧的缩略图 (Icon)
+                list_item = self.frame_list.item(i)
+                if list_item:
+                    icon_pix = frame_info["pixmap"].scaled(45, 45, Qt.AspectRatioMode.KeepAspectRatio)
+                    list_item.setIcon(QIcon(icon_pix))
+
+        # 2. 信号通知：确保预览面板收到两个参数
+        curr_seg = getattr(self, 'current_segment', {})
+        # 兼容处理：如果 curr_seg 为空，构造一个临时的
+        if not curr_seg and len(self.current_bundle.frames) > 0:
+            curr_seg = {'start': 1, 'end': len(self.current_bundle.frames)}
+            
+        self.bundle_updated.emit(self.current_bundle, curr_seg)
+        print(f"DEBUG: [Sync Success] {self.current_bundle.name} 数据已入库")

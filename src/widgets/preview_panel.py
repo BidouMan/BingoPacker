@@ -137,31 +137,30 @@ class PreviewPanel(QFrame):
 
     # --- 逻辑接口 (重构部分，对接新数据结构) ---
 
+    # preview_panel.py
+
     def start_segment_preview(self, bundle, segment):
-        """对接 MainWindow 的核心接口"""
-        self.play_timer.stop()
+        # 记录是否是同一个片段
+        is_same_seg = (self.current_bundle == bundle and self.current_segment == segment)
+        
         self.current_bundle = bundle
         self.current_segment = segment
-        self.current_frame_relative_idx = 0
         
-        # 还原 ZIP 模式可能需要的路径 (兼容原有 toggle 逻辑)
-        self.current_asset_path = bundle.path if hasattr(bundle, 'path') else None
-
-        # self.title_label.setText(f"PREVIEW: {segment.get('name', 'Default')}")
+        # 如果不是同一个片段，才重置进度条到第一帧
+        if not is_same_seg:
+            self.current_frame_relative_idx = 0
+            
+        # --- 关键：无论是不是同一个，都要执行重新渲染 ---
+        # 这样内存中修改后的 Pixmap 才会替换掉 Label 里的旧图
         self.render_current_frame()
         
-        # 自动播放逻辑
-        start, end = segment.get('start', 1), segment.get('end', 1)
-        if end > start:
-            fps = max(1, self.speed_slider.value())
-            self.play_timer.start(1000 // fps)
+        # 确保定时器正常运行
+        self.update_play_speed() # 刷新频率
+        if not self.play_timer.isActive() and len(bundle.frames) > 1:
+            self.play_timer.start()
             self.update_play_button_icon(True)
-        else:
-            self.update_play_button_icon(False)
 
     def render_current_frame(self):
-        """统一渲染入口"""
-        
         if not self.current_bundle or not self.current_bundle.frames:
             return
 
@@ -169,7 +168,10 @@ class PreviewPanel(QFrame):
         abs_idx = (start_val - 1) + self.current_frame_relative_idx
         
         if 0 <= abs_idx < len(self.current_bundle.frames):
-            pixmap = self.current_bundle.frames[abs_idx].pixmap
+            # 核心：直接访问 FrameData 对象中的 pixmap 属性
+            # 之前可能是通过某种转换，现在确保它是实时的
+            frame_obj = self.current_bundle.frames[abs_idx]
+            pixmap = frame_obj.pixmap 
             self._display_pixmap(pixmap)
 
     def _display_pixmap(self, pixmap):

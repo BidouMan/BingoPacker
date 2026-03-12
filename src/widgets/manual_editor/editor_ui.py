@@ -141,7 +141,7 @@ class EditorUI:
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.verticalScrollBar().setFixedWidth(0)
         self.frame_list.verticalScrollBar().setStyleSheet("width: 0px; height: 0px;")
-        
+        # self.frame_list.installEventFilter(self)
         content_layout.addWidget(self.frame_list)
         self.canvas_layout = QVBoxLayout()
         content_layout.addLayout(self.canvas_layout)

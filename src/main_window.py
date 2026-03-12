@@ -154,32 +154,27 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
         self.btn_bgs.clicked.connect(self.handle_export_bgs_request)    
         self.btn_sprite.clicked.connect(self.handle_export_sprite_request)
-
+        
+        # self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
         self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
         self.preview_panel.asset_tree.segment_changed.connect(self.preview_panel.update_segment_range)
+        # self.manual_editor.bundle_updated.connect(self.preview_panel.start_segment_preview)
 
-    def on_editor_bundle_changed(self, bundle):
-        """处理来自 ManualEditor 的素材同步"""
-        tree = self.preview_panel.asset_tree
-        
-        # 1. 如果是清空信号 (bundle 为 None)
+    def on_editor_bundle_changed(self, bundle, segment=None):
         if bundle is None:
-            # 清空左侧资源树
-            tree.reset_with_bundle(None)
-            
-            # --- 核心修复：调用你 PreviewPanel 里真实定义的清理函数 ---
-            # 你的代码里已经写了 def stop_and_clear(self):
             self.preview_panel.stop_and_clear()
-            
-            print("DEBUG [Main]: 全局清理完成，预览面板已调用 stop_and_clear")
             return
 
-        # 2. 如果是正常的素材导入 (bundle 不为空)
-        tree.reset_with_bundle(bundle)
+        # 更新资源树
+        self.preview_panel.asset_tree.reset_with_bundle(bundle)
         
-        if bundle.segments:
-            default_segment = bundle.segments[0]
-            self.preview_panel.start_segment_preview(bundle, default_segment)
+        # 如果没有传入 segment，尝试从预览面板获取当前的，或者取第一个
+        if not segment:
+            segment = self.preview_panel.current_segment or (bundle.segments[0] if bundle.segments else None)
+        
+        if segment:
+            # 强制预览面板重载画面
+            self.preview_panel.start_segment_preview(bundle, segment)
             
 
 
