@@ -63,39 +63,53 @@ class ScalableView(QGraphicsView):
 
     # scalable_view.py
 
+    def get_appropriate_cursor(self):
+        if self._is_panning:
+            return Qt.ClosedHandCursor
+        editor = self.parent()
+        # 寻找 ManualEditor 容器
+        while editor and not hasattr(editor, 'btn_magic_wand'):
+            editor = editor.parent()
+            
+        if editor and editor.btn_magic_wand.isChecked():
+            return Qt.CrossCursor
+        if hasattr(self, 'selection_manager') and self.selection_manager.active:
+            return Qt.CrossCursor
+        return Qt.OpenHandCursor
+
+    def update_cursor_style(self):
+        """唯一允许修改光标的入口"""
+        self.viewport().setCursor(self.get_appropriate_cursor())
+
     def mousePressEvent(self, event):
-        # 1. 中键平移逻辑
+        # 1. 中键平移
         if event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = True
             self._last_mouse_pos = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
+            self.update_cursor_style()
             return
 
-        editor = self.parent() # 或者通过引用的方式获取 editor
-        if hasattr(editor, 'btn_magic_wand') and editor.btn_magic_wand.isChecked():
+        # 2. 魔棒逻辑 (只有左键且魔棒开启时)
+        editor = self.parent()
+        while editor and not hasattr(editor, 'btn_magic_wand'): editor = editor.parent()
+        if editor and editor.btn_magic_wand.isChecked():
             if event.button() == Qt.MouseButton.LeftButton:
-                # 转换坐标
                 local_pos = self.get_canvas_coordinates(event.pos())
-                
-                # 调用 editor 的魔棒处理逻辑
                 if hasattr(editor, 'handle_magic_wand_click'):
                     editor.handle_magic_wand_click(local_pos)
                 return
 
-        # 2. 选取模式转发
+        # 3. 选取模式转发
         if hasattr(self, 'selection_manager') and self.selection_manager.active:
             if event.button() == Qt.MouseButton.LeftButton:
-                # 转换坐标并提取修饰键
                 scene_pos = self.mapToScene(event.pos())
-                modifiers = event.modifiers()
-                # 调用你代码中真实的名字：handle_press
-                self.selection_manager.handle_press(scene_pos, modifiers)
+                self.selection_manager.handle_press(scene_pos, event.modifiers())
                 return 
 
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        # 中键平移逻辑
+        # 1. 中键平移逻辑
         if self._is_panning:
             delta = event.pos() - self._last_mouse_pos
             self._last_mouse_pos = event.pos()
@@ -103,35 +117,31 @@ class ScalableView(QGraphicsView):
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             return
 
-        # 选取模式转发
+        # 2. 选取模式转发 (这里之前被我改废了，现在完全还原)
         if hasattr(self, 'selection_manager') and self.selection_manager.active:
-            # 转换坐标
             scene_pos = self.mapToScene(event.pos())
-            # 调用你代码中真实的名字：handle_move
             self.selection_manager.handle_move(scene_pos)
             return
 
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        # 中键平移结束
+        # 1. 执行基类逻辑（确保 Qt 内部状态正确）
+        super().mouseReleaseEvent(event)
+
+        # 2. 中键平移结束
         if event.button() == Qt.MouseButton.MiddleButton:
             self._is_panning = False
-            cursor = Qt.CrossCursor if (hasattr(self, 'selection_manager') and self.selection_manager.active) else Qt.ArrowCursor
-            self.setCursor(cursor)
-            return
-
-        # 选取模式转发
+        
+        # 3. 选取模式转发
         if hasattr(self, 'selection_manager') and self.selection_manager.active:
             if event.button() == Qt.MouseButton.LeftButton:
-                # 转换坐标并提取修饰键
                 scene_pos = self.mapToScene(event.pos())
-                modifiers = event.modifiers()
-                # 调用你代码中真实的名字：handle_release
-                self.selection_manager.handle_release(scene_pos, modifiers)
-                return
+                self.selection_manager.handle_release(scene_pos, event.modifiers())
 
-        super().mouseReleaseEvent(event)
+        # 4. 【关键】无论发生了什么，最后根据状态机强制刷回十字或手掌
+        self.update_cursor_style()
+        
     
     def mouseDoubleClickEvent(self, event):
         if hasattr(self, 'selection_manager') and self.selection_manager.active:

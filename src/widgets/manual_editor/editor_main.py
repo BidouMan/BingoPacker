@@ -496,28 +496,16 @@ class ManualEditor(QWidget, EditorUI):
     
     def on_magic_wand_toggled(self, checked):
         """当魔棒按钮状态切换时触发"""
-        from PySide6.QtWidgets import QGraphicsView # 确保导入了 QGraphicsView
-        
+        # 只需要让视图重绘光标即可，不需要手动 setDragMode 了
+        # 因为我们已经在视图内部通过状态机决定了鼠标样式
         if checked:
-            # 1. 强制关闭手掌模式：这一步最关键
-            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
-            
-            # 2. 设置光标：使用 Qt.CrossCursor (或者 Qt.CursorShape.CrossCursor)
-            # 如果想更明显一点，可以用 Qt.CursorShape.PointingHandCursor 试试
-            self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
-            
-            # 3. 禁用其他选框逻辑
+            # 互斥逻辑：开启魔棒时，关闭矩形选取模式
+            self.btn_pick.setChecked(False) 
             self.selection_manager.set_active(False)
-            
-            print("DEBUG [Editor]: 已进入魔棒模式，禁用拖拽，光标设为十字")
-        else:
-            # 1. 恢复手掌模式
-            self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            
-            # 2. 恢复默认光标
-            self.view.viewport().unsetCursor()
-            
-            print("DEBUG [Editor]: 已退出魔棒模式，恢复手掌拖拽")
+        
+        # 核心：通知视图根据最新状态更新光标
+        self.view.update_cursor_style()
+        print(f"DEBUG [Editor]: 魔棒模式切换为: {checked}")
     
     def deselect_all(self):
         """取消选择：同时清理魔棒选区和手动矩形选区"""
