@@ -502,6 +502,9 @@ class ManualEditor(QWidget, EditorUI):
     
     def on_magic_wand_toggled(self, checked):
         """当魔棒按钮状态切换时触发"""
+        if hasattr(self, 'magic_wand_panel'):
+            self.magic_wand_panel.setVisible(checked)
+
         # 只需要让视图重绘光标即可，不需要手动 setDragMode 了
         # 因为我们已经在视图内部通过状态机决定了鼠标样式
         if checked:

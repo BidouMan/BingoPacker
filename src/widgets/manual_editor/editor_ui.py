@@ -1,4 +1,5 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QFrame, QPushButton, QButtonGroup
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QFrame, QPushButton, QButtonGroup,
+                               QLabel,QSlider,QCheckBox)
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 import os
@@ -14,7 +15,7 @@ class EditorUI:
                 outline: none; 
                 padding: 0px; 
             }
-            /* 强制 Item 内部边距和间距 */
+            /* 强制 Item 内部边距 and 间距 */
             QListWidget::item { 
                 background-color: #2c313a; 
                 border-radius: 4px; 
@@ -29,6 +30,15 @@ class EditorUI:
             }
             QPushButton { background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }
             QPushButton:hover { background-color: #3e4451; }
+
+            /* --- 仅为新组件添加必要的样式，不触碰原有组件 --- */
+            QSlider::groove:horizontal { border: 1px solid #181a1f; height: 4px; background: #353b45; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #61afef; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+            QCheckBox::indicator { width: 16px; height: 16px; background-color: #353b45; border: 1px solid #181a1f; border-radius: 3px; }
+            QCheckBox::indicator:checked { 
+                background-color: #61afef; 
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yMCA2TDkgMTdsLTUtNSIvPjwvc3ZnPg==);
+            }
         """)
 
         layout = QVBoxLayout(widget)
@@ -42,7 +52,7 @@ class EditorUI:
         toolbar_layout.setContentsMargins(5, 0, 5, 0)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
-
+        # 基础按钮 - 严格保持你的原始定义（不限制 size，不改文字）
         self.btn_new_file = self._create_tool_btn("btn_new_file",'新建')
         self.btn_save = self._create_tool_btn("btn_save", "保存")
         self.btn_magic_wand = self._create_tool_btn("btn_magic_wand", "选取", checkable=True)
@@ -61,26 +71,56 @@ class EditorUI:
         toolbar_layout.addWidget(self.btn_pick)
         toolbar_layout.addWidget(self.btn_slice)
         toolbar_layout.addWidget(self.btn_clear)
+
+        # --- 插入弹簧实现右对齐 ---
+        toolbar_layout.addStretch()
+
+        # --- 魔棒工具选项面板 ---
+        self.magic_wand_panel = QWidget()
+        self.magic_wand_panel.setVisible(False)
+        mw_layout = QHBoxLayout(self.magic_wand_panel)
+        mw_layout.setContentsMargins(0, 0, 0, 0)
+        mw_layout.setSpacing(4)
+
+        # 新增按钮也遵循全局 QPushButton 样式（自动撑开尺寸）
+        self.btn_expand = QPushButton("扩")
+        self.btn_shrink = QPushButton("缩")
+        self.btn_invert = QPushButton("反")
+        
+        # 容差滑动条与百分比
+        mw_layout.addWidget(QLabel("容差"))
+        
+        self.slider_tolerance = QSlider(Qt.Orientation.Horizontal)
+        self.slider_tolerance.setRange(0, 255)
+        self.slider_tolerance.setValue(20)
+        self.slider_tolerance.setFixedWidth(80)
+        mw_layout.addWidget(self.slider_tolerance)
+
+        self.lbl_tolerance_val = QLabel("20%")
+        self.lbl_tolerance_val.setFixedWidth(35)
+        mw_layout.addWidget(self.lbl_tolerance_val)
+
+        self.check_contiguous = QCheckBox("连续")
+        mw_layout.addWidget(self.check_contiguous)
+
+        mw_layout.addSpacing(20)
+        mw_layout.addWidget(self.btn_expand)
+        mw_layout.addWidget(self.btn_shrink)
+        mw_layout.addWidget(self.btn_invert)
+        
+
+        toolbar_layout.addWidget(self.magic_wand_panel)
         layout.addWidget(self.toolbar)
 
-        # 内容区
+        # 内容区 (严格保持你提供的代码，不改动任何尺寸)
         content_layout = QHBoxLayout()
         self.frame_list = QListWidget()
-        
-        # --- 核心 UI 修正点 ---
         self.frame_list.setFixedWidth(82)
-        self.frame_list.setViewMode(QListWidget.IconMode) # 设为图标模式
-        self.frame_list.setResizeMode(QListWidget.Adjust) # 自动调整
+        self.frame_list.setViewMode(QListWidget.IconMode) 
+        self.frame_list.setResizeMode(QListWidget.Adjust) 
         self.frame_list.setMovement(QListWidget.Static)
-        
-        # 1. 显式设置图标尺寸（卡片内的图片大小）
         self.frame_list.setIconSize(QSize(48, 48)) 
-        
-        # 2. 设置网格尺寸：宽度74保证正好塞入82的容器(考虑margin)，高度也要接近74实现正方形感
-        # 因为下方要写字，高度稍微给多一点点（例如 78）看起来会更像视觉上的正方形
         self.frame_list.setGridSize(QSize(74, 78)) 
-        
-        # 3. 彻底禁用并隐藏滚动条空间
         self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.verticalScrollBar().setFixedWidth(0)
