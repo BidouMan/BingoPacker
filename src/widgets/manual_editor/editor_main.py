@@ -72,6 +72,16 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_save.clicked.connect(self.on_save_clicked)
         self.btn_clear.clicked.connect(self.clear_all)
 
+        # 魔棒工具按钮功能
+        self.slider_tolerance.valueChanged.connect(self._on_tolerance_changed)
+    
+    def _on_tolerance_changed(self, value):
+        """同步显示百分比并更新魔棒工具的内部容差值"""
+        percent = int((value / 255) * 100)
+        self.lbl_tolerance_val.setText(f"{percent}%")
+        # 同步更新魔棒工具类里的 tolerance
+        self.magic_wand.tolerance = value
+
     def display_image(self, file_path):
         if not os.path.exists(file_path): return
         self.update_selection_display(QRegion())
@@ -373,9 +383,9 @@ class ManualEditor(QWidget, EditorUI):
 
     def handle_magic_wand_click(self, scene_pos):
         """
-        处理来自 ScalableView 的点击 (传进来的是场景坐标)
+        处理来自 ScalableView 的点击，根据当前 UI 配置执行魔棒算法
         """
-        # 1. 确定当前操作的图元 (优先预览图元，其次是原始图元)
+        # 1. 确定当前操作的图元
         target_item = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else None
         if not target_item and hasattr(self, 'pixmap_item'):
             target_item = self.pixmap_item
@@ -383,36 +393,32 @@ class ManualEditor(QWidget, EditorUI):
         if not target_item or not target_item.pixmap():
             return
 
-        # 2. 【核心修复】将场景坐标转换为图元内部的像素坐标
-        # 这是为了解决图片在场景中被移动（Pos不为0）或缩放后的坐标偏移问题
+        # 2. 坐标转换：将场景坐标映射到图元内部像素坐标
         local_pos_f = target_item.mapFromScene(scene_pos)
         item_pos = local_pos_f.toPoint()
 
-        # 3. 获取 QImage 进行边界检查
+        # 3. 边界检查
         img = target_item.pixmap().toImage()
         if not img.rect().contains(item_pos):
-            print(f"DEBUG [Editor]: 点击位置 {item_pos.x()},{item_pos.y()} 越界，不在图片范围内")
             return
 
-        # 打印调试信息，确认点击的颜色是否符合预期
-        pixel_color = img.pixelColor(item_pos)
-        print(f"DEBUG [Editor]: 点击像素点({item_pos.x()}, {item_pos.y()}) "
-              f"颜色为: RGBA({pixel_color.red()}, {pixel_color.green()}, "
-              f"{pixel_color.blue()}, {pixel_color.alpha()})")
+        # 4. 从 UI 读取动态参数
+        # 读取滑动条的容差值
+        current_tolerance = self.slider_tolerance.value()
+        # 读取“连续”勾选框状态
+        is_contiguous = self.check_contiguous.isChecked()
 
-        # 如果点到了几乎透明的地方，通常泛洪会填满整个背景，这里可以做个预防
-        if pixel_color.alpha() < 5:
-            print("DEBUG [Editor]: 警告：点击了透明区域，可能会选中整个背景。")
-
-        # 4. 执行魔棒算法
-        # 建议：如果之前红橙不分，可以将 tolerance 调低到 10-20
-        self.magic_wand.tolerance = 20 
+        # 5. 配置并执行魔棒算法
+        self.magic_wand.tolerance = current_tolerance
         
-        # 传入 img 和精准的 item_pos
-        selection_region = self.magic_wand.get_selection_region(img, item_pos)
+        # 传入图像、点击点以及是否连续的布尔值
+        selection_region = self.magic_wand.get_selection_region(
+            img, 
+            item_pos, 
+            contiguous=is_contiguous
+        )
         
-        # 5. 存储并渲染
-        # 这里存储的是相对于图片坐标系的 QRegion
+        # 6. 存储选区并触发蚂蚁线渲染
         self.selection_mask = selection_region
         self.update_selection_display(selection_region)
 

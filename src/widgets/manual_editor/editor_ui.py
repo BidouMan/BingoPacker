@@ -92,11 +92,11 @@ class EditorUI:
         
         self.slider_tolerance = QSlider(Qt.Orientation.Horizontal)
         self.slider_tolerance.setRange(0, 255)
-        self.slider_tolerance.setValue(20)
+        self.slider_tolerance.setValue(25)
         self.slider_tolerance.setFixedWidth(80)
         mw_layout.addWidget(self.slider_tolerance)
 
-        self.lbl_tolerance_val = QLabel("20%")
+        self.lbl_tolerance_val = QLabel("10%")
         self.lbl_tolerance_val.setFixedWidth(35)
         mw_layout.addWidget(self.lbl_tolerance_val)
 

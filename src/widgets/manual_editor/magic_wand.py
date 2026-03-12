@@ -25,64 +25,53 @@ class MagicWandTool:
         # 此时的 tolerance 建议设置在 10-30 之间
         return distance <= self.tolerance
 
-    def get_selection_region(self, image, start_point):
-        """
-        执行泛洪填充算法，返回一个精准的 QRegion。
-        """
-        # 1. 基础合法性检查
+    def get_selection_region(self, image, start_point, contiguous=True):
         if image.isNull() or not image.rect().contains(start_point):
             return QRegion()
 
-        # 2. 预处理图片：统一转为带 Alpha 的 32 位格式，确保像素读取一致性
         img = image.convertToFormat(QImage.Format_ARGB32)
         width, height = img.width(), img.height()
         target_color = img.pixelColor(start_point)
         
-        # 3. 准备单色位图掩码 (Format_Mono)
-        # Qt 的单色图：0 通常对应 Qt.color0，1 对应 Qt.color1
+        # 创建一个单色掩码，确保初始为全黑 (0)
         mask = QImage(img.size(), QImage.Format_Mono)
-        mask.fill(0) # 初始化为全黑（未选中）
+        mask.fill(0) 
 
-        # 4. 泛洪填充 (Flood Fill)
-        stack = [start_point]
-        visited = set()
-        visited.add((start_point.x(), start_point.y()))
+        if not contiguous:
+            # --- 非连续模式：遍历全图 ---
+            for y in range(height):
+                for x in range(width):
+                    if self.is_color_similar(target_color, img.pixelColor(x, y)):
+                        mask.setPixel(x, y, 1)
+        else:
+            # --- 连续模式：泛洪算法 ---
+            stack = [start_point]
+            visited = set([(start_point.x(), start_point.y())])
+            while stack:
+                p = stack.pop()
+                x, y = p.x(), p.y()
+                mask.setPixel(x, y, 1)
 
-        while stack:
-            p = stack.pop()
-            x, y = p.x(), p.y()
-            
-            # 在掩码上标记该像素已选中
-            mask.setPixel(x, y, 1)
+                for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
+                        if self.is_color_similar(target_color, img.pixelColor(nx, ny)):
+                            visited.add((nx, ny))
+                            stack.append(QPoint(nx, ny))
 
-            # 检查上下左右四邻域
-            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                nx, ny = x + dx, y + dy
-                
-                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
-                    current_color = img.pixelColor(nx, ny)
-                    
-                    # 使用 self.is_color_similar 比较颜色
-                    if self.is_color_similar(target_color, current_color):
-                        visited.add((nx, ny))
-                        stack.append(QPoint(nx, ny))
-
-        # 5. 【核心】将位图掩码转换为精细的 QRegion
-        # QBitmap 会自动将值为 1 的像素识别为有效区域（Foreground）
-        # QRegion 构造函数会自动将这些像素合并成最高效的矩形集合
-        # 显式创建位图，并确保其格式
-        # 1. 生成初始选区
+        # --- 核心修复：更稳定的 QRegion 构造方案 ---
+        # 1. 将 mask 强制转换为 QBitmap
         selection_bitmap = QBitmap.fromImage(mask)
         
-        # 2. 从位图构造选区
+        # 2. 从位图提取区域
         region = QRegion(selection_bitmap)
         
-        # 3. 【纠偏关键】检查点击点是否在选区内
-        # 如果 start_point 不在 region 里，说明 0 和 1 真的反了
+        # 3. 终极逻辑检查：如果点击点 (start_point) 竟然不在结果区域内，说明 0/1 彻底反了
+        # 注意：这里不用 intersected 或 subtracted，直接利用 mask 的 setPixelColor 逻辑强制纠偏
         if not region.contains(start_point):
-            # 这种方法比 invertPixels 更稳，因为它直接反转了区域逻辑
-            full_region = QRegion(QRect(0, 0, width, height))
-            region = full_region.subtracted(region)
+            # 获取全图矩形区域
+            full_rect_region = QRegion(QRect(0, 0, width, height))
+            # 只有当 mask 填充的是“背景”时才执行取反
+            region = full_rect_region.subtracted(region)
 
-        # 4. 最后的边界约束
         return region.intersected(QRect(0, 0, width, height))
