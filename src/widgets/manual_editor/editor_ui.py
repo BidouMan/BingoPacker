@@ -74,7 +74,7 @@ class EditorUI:
         self.btn_magic_wand = self._create_tool_btn("btn_magic_wand", "选取", checkable=True)
         self.btn_pick = self._create_tool_btn("btn_pick", "选取", checkable=True)
         self.btn_slice = self._create_tool_btn("on_slice_clicked", "裁切", checkable=True)
-        self.btn_clear = QPushButton("清空")
+        self.btn_cut= self._create_tool_btn("btn_cut", "调整画布", checkable=True)
 
         self.tool_group = QButtonGroup(widget)
         self.tool_group.addButton(self.btn_magic_wand)
@@ -86,7 +86,7 @@ class EditorUI:
         toolbar_layout.addWidget(self.btn_magic_wand)
         toolbar_layout.addWidget(self.btn_pick)
         toolbar_layout.addWidget(self.btn_slice)
-        toolbar_layout.addWidget(self.btn_clear)
+        toolbar_layout.addWidget(self.btn_cut)
 
         # --- 插入弹簧实现右对齐 ---
         toolbar_layout.addStretch()

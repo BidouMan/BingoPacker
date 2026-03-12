@@ -205,3 +205,12 @@ class CheckerboardItem(QGraphicsItem):
         painter.setPen(Qt.NoPen)
         painter.drawRect(self.rect)
         painter.restore()
+    
+    def reset_canvas(self, rect):
+        self.scene().setSceneRect(rect)
+        if not self.checker_item:
+            from .scalable_view import CheckerboardItem
+            self.checker_item = CheckerboardItem(rect)
+            self.scene().addItem(self.checker_item)
+        else:
+            self.checker_item.set_rect(rect)

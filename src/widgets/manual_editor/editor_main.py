@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem
+from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem,QGraphicsView
 from PySide6.QtCore import Qt, QRectF, Signal, QSize,QPoint
 from PySide6.QtGui import QPixmap, QIcon, QPainter,QPainterPath,QColor,QPen,QRegion,QShortcut, QKeySequence,QCursor
 
@@ -10,6 +10,7 @@ from ...logic_slice import SliceLogic
 from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
 from .magic_wand import MagicWandTool
+from .crop_tool import CropBoxItem
 
 class ManualEditor(QWidget, EditorUI):
     slice_completed = Signal(str, list)
@@ -70,7 +71,7 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_slice.clicked.connect(self.on_do_slice)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
         self.btn_save.clicked.connect(self.on_save_clicked)
-        self.btn_clear.clicked.connect(self.clear_all)
+        self.btn_cut.clicked.connect(self.on_cut_mode_toggled)
 
         # 魔棒工具按钮功能
         self.slider_tolerance.valueChanged.connect(self._on_tolerance_changed)
@@ -86,6 +87,19 @@ class ManualEditor(QWidget, EditorUI):
         self.magic_wand.tolerance = value
 
     def display_image(self, file_path):
+        if hasattr(self, 'crop_box') and self.crop_box:
+            try:
+                if self.crop_box.scene():
+                    self.scene.removeItem(self.crop_box)
+            except RuntimeError:
+                pass
+            self.crop_box = None
+            
+            # 同步更新按钮状态
+            self.btn_cut.blockSignals(True)
+            self.btn_cut.setChecked(False)
+            self.btn_cut.blockSignals(False)
+
         if not os.path.exists(file_path): return
         self.update_selection_display(QRegion())
 
@@ -629,3 +643,89 @@ class ManualEditor(QWidget, EditorUI):
             self.selection_mask = full_rect.subtracted(self.selection_mask) if self.selection_mask else full_rect
             self.update_selection_display(self.selection_mask)
     
+
+    def on_cut_mode_toggled(self, checked):
+        if checked:
+            # 进入裁切模式
+            self.view.setDragMode(QGraphicsView.NoDrag) # 禁用视图平移，让鼠标处理裁切框
+            self.start_crop_session()
+        else:
+            # 退出裁切模式
+            self.finish_crop_session()
+
+    def start_crop_session(self):
+        """进入裁切模式"""
+        target_item = self.pixmap_item
+        if not target_item or not target_item.pixmap():
+            return
+        
+        # 获取图片在场景中的矩形
+        image_rect = target_item.boundingRect()
+        
+        # 创建裁切框，传入场景范围（用于遮罩）和初始矩形
+        # 这里初始矩形建议比原图稍微小一点点，让用户看到手柄
+        self.crop_box = CropBoxItem(image_rect, image_rect)
+        self.scene.addItem(self.crop_box)
+        
+        # 禁用视图的拖拽模式，防止干扰
+        self.view.setDragMode(ScalableView.NoDrag)
+
+    def finish_crop_session(self):
+        """应用裁切逻辑并退出"""
+        # 1. 变量存在性检查
+        if not hasattr(self, 'crop_box') or self.crop_box is None:
+            return
+
+        try:
+            # 2. 检查内部 C++ 对象是否还活着
+            # 如果 scene() 返回 None 或抛出 RuntimeError，说明对象已销毁
+            if not self.crop_box.scene(): 
+                self.crop_box = None
+                return
+
+            crop_rect = self.crop_box.rect().normalized().toRect()
+            
+            # ... (中间的裁切逻辑保持不变) ...
+            original_pixmap = self.pixmap_item.pixmap()
+            if not original_pixmap.isNull():
+                new_pixmap = QPixmap(crop_rect.width(), crop_rect.height())
+                new_pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(new_pixmap)
+                target_pos = QPoint(-crop_rect.x(), -crop_rect.y())
+                painter.drawPixmap(target_pos, original_pixmap)
+                painter.end()
+                self.pixmap_item.setPixmap(new_pixmap)
+                self.pixmap_item.setPos(0, 0)
+                new_rect = QRectF(0, 0, new_pixmap.width(), new_pixmap.height())
+                self.scene.setSceneRect(new_rect)
+                if hasattr(self.view, 'checker_item') and self.view.checker_item:
+                    self.view.checker_item.set_rect(new_rect)
+
+        except RuntimeError:
+            # 捕获 "Internal C++ object already deleted"
+            pass
+        finally:
+            # 3. 彻底清理引用
+            if hasattr(self, 'crop_box') and self.crop_box:
+                # 再次检查 scene 确保可以安全 remove
+                try:
+                    if self.crop_box.scene():
+                        self.scene.removeItem(self.crop_box)
+                except RuntimeError:
+                    pass
+                self.crop_box = None
+            
+            # 4. 恢复 UI 状态
+            # 暂时阻塞信号，防止按钮状态改变再次触发此函数导致死循环
+            self.btn_cut.blockSignals(True)
+            self.btn_cut.setChecked(False)
+            self.btn_cut.blockSignals(False)
+            self.view.setDragMode(ScalableView.ScrollHandDrag)
+    
+    def keyPressEvent(self, event):
+        # 如果当前正在裁切模式（crop_box 存在）
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if hasattr(self, 'crop_box') and self.crop_box:
+                self.finish_crop_session()
+                return
+        super().keyPressEvent(event)
