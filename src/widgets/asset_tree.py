@@ -333,6 +333,11 @@ class AssetTree(QTreeWidget):
             item.parent().removeChild(item)
 
     def reset_with_bundle(self, bundle):
-        """清空所有节点并只显示当前这一个 bundle"""
-        self.clear() # 清空 QTreeWidget 所有项
-        self.add_bundle(bundle)
+        """先完全清空，再根据 bundle 决定是否重建节点"""
+        self.clear() # QTreeWidget 提供的清空所有项的方法
+        
+        # 增加判空保护
+        if bundle is not None:
+            self.add_bundle(bundle)
+        else:
+            print("DEBUG [AssetTree]: 接收到空资源信号，树结构已重置为空")

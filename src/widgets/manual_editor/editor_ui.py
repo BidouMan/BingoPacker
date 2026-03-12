@@ -42,6 +42,7 @@ class EditorUI:
         toolbar_layout.setContentsMargins(5, 0, 5, 0)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
+        self.btn_new_file = self._create_tool_btn("btn_new_file",'新建')
         self.btn_save = self._create_tool_btn("btn_save", "保存")
         self.btn_pick = self._create_tool_btn("btn_pick", "选取", checkable=True)
         self.btn_pick.setCheckable(True)
@@ -53,6 +54,7 @@ class EditorUI:
         self.tool_group.addButton(self.btn_pick)
         self.tool_group.addButton(self.btn_slice)
 
+        toolbar_layout.addWidget(self.btn_new_file)
         toolbar_layout.addWidget(self.btn_save)
         toolbar_layout.addWidget(self.btn_pick)
         toolbar_layout.addWidget(self.btn_slice)

@@ -161,6 +161,7 @@ class PreviewPanel(QFrame):
 
     def render_current_frame(self):
         """统一渲染入口"""
+        
         if not self.current_bundle or not self.current_bundle.frames:
             return
 
@@ -318,3 +319,37 @@ class PreviewPanel(QFrame):
         else:
             # 如果切了不同的片段，走完整的初始化流程
             self.start_segment_preview(bundle, segment)
+    
+    # preview_panel.py
+
+    def stop_and_clear(self):
+        """停止播放并彻底擦除画面"""
+        print("DEBUG [PreviewPanel]: 执行清理流程...")
+        
+        # 1. 停止定时器
+        if self.play_timer.isActive():
+            self.play_timer.stop()
+            
+        # 2. 清空逻辑变量
+        self.current_bundle = None
+        self.current_segment = None
+        self.current_frame_relative_idx = 0
+        
+        # 3. --- 强制清空显示 (使用正确的变量名 preview_screen) ---
+        if hasattr(self, 'preview_screen'):
+            # 先清空文字
+            self.preview_screen.clear() 
+            # 加上你想要的强制缓冲区刷新
+            # 创建一个 1x1 的透明图来覆盖旧的显存内容
+            empty_pix = QPixmap(1, 1)
+            empty_pix.fill(Qt.GlobalColor.transparent) 
+            self.preview_screen.setPixmap(empty_pix)
+            
+            # 设置占位文字并强制重绘
+            self.preview_screen.setText("暂无预览")
+            self.preview_screen.repaint() 
+        
+        # 4. 更新按钮状态
+        self.update_play_button_icon(False)
+        
+        print("DEBUG [PreviewPanel]: 画面通过 preview_screen 彻底擦除完成")

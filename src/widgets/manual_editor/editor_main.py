@@ -50,14 +50,12 @@ class ManualEditor(QWidget, EditorUI):
 
     def connect_signals(self):
         # 确保 UI 中的所有按钮都正确绑定
+        self.btn_new_file.clicked.connect(self.clear_all)
         self.btn_pick.toggled.connect(self.selection_manager.set_active)
         self.btn_slice.clicked.connect(self.on_do_slice)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
         self.btn_save.clicked.connect(self.on_save_clicked)
         self.btn_clear.clicked.connect(self.clear_all)
-        # 补全 btn_new_file 的逻辑（如有需要）
-        if hasattr(self, 'btn_new_file'):
-            self.btn_new_file.clicked.connect(lambda: print("选取文件"))
 
     def display_image(self, file_path):
         if not os.path.exists(file_path): return
@@ -216,7 +214,7 @@ class ManualEditor(QWidget, EditorUI):
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
             
-            print(f"DEBUG [Editor]: 裁切完成，共 {len(self.current_frames)} 帧，已同步至模型。")
+
 
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""
@@ -226,7 +224,7 @@ class ManualEditor(QWidget, EditorUI):
 
         if target and hasattr(target, 'on_editor_bundle_changed'):
             target.on_editor_bundle_changed(self.current_bundle)
-            print(f"DEBUG [Editor]: 裁切同步完成，共 {len(self.current_bundle.frames)} 帧")
+
 
     def update_frame_list_ui(self):
         """将裁切后的每一帧存入左侧列表，并强制正方形尺寸"""
@@ -281,9 +279,30 @@ class ManualEditor(QWidget, EditorUI):
         print(f"已保存至: {save_dir}")
 
     def clear_all(self):
-        self.scene.clear()
-        self.frame_list.clear()
+        """完全清空编辑器状态并重置全局环境"""
+        # 1. 清理数据管理层 (核心：防止 AssetTree 残留)
+        self.asset_manager.clear_all()
+        
+        # 2. 清理编辑器内部变量
+        self.current_bundle = None
         self.current_frames = []
+        self.current_source_path = None
+        
+        # 3. 清理 UI 组件
+        self.frame_list.blockSignals(True)
+        self.frame_list.clear()
+        self.frame_list.blockSignals(False)
+        
+        self.scene.clear()
+        self.preview_item = None
+        if hasattr(self.view, 'checker_item'):
+            self.view.checker_item = None
+            
+        # 4. --- 关键步骤：通知全局 UI ---
+        # 发射 bundle_updated 信号，但传递 None，表示“当前已无活动资源”
+        self.bundle_updated.emit(None)
+        
+        print("DEBUG [Editor]: 场景已完全重置，已发送全局清理信号")
     
     def import_project_file(self, file_path):
         """导入并还原工程文件数据到编辑器 UI"""
