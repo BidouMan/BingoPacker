@@ -6,7 +6,7 @@ class CropHandle(QGraphicsRectItem):
     def __init__(self, parent, pos_key):
         super().__init__(parent)
         self.pos_key = pos_key
-        self.size = 6 # 开启忽略变换后，6像素通常更易点击
+        self.size = 8 # 开启忽略变换后，6像素通常更易点击
         self.setRect(-self.size/2, -self.size/2, self.size, self.size)
         
         self.setBrush(QColor("#61afef"))

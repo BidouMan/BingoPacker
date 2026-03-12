@@ -26,6 +26,9 @@ class ManualEditor(QWidget, EditorUI):
         self.preview_item = None
         self.magic_wand = MagicWandTool(tolerance=15)
         self.selection_mask = None # 存储当前的选区
+        # 撤销栈，存储 QPixmap 对象
+        self.undo_stack = []
+        self.max_undo_steps = 20
         
         # 初始化 UI
         self.setup_ui(self)
@@ -87,6 +90,7 @@ class ManualEditor(QWidget, EditorUI):
         self.magic_wand.tolerance = value
 
     def display_image(self, file_path):
+        self.undo_stack.clear() 
         if hasattr(self, 'crop_box') and self.crop_box:
             try:
                 if self.crop_box.scene():
@@ -190,6 +194,8 @@ class ManualEditor(QWidget, EditorUI):
                     if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
         if not bg_item: 
             return
+
+        # self.save_undo_state() #存档
 
         # 2. 执行裁切逻辑（手动或自动）
         rects = self.selection_manager.get_sorted_selections()
@@ -568,6 +574,8 @@ class ManualEditor(QWidget, EditorUI):
         if not target_item or not target_item.pixmap():
             return
 
+        self.save_undo_state() #存档
+
         # 2. 构造最终的像素级选区 (QRegion)
         final_region = QRegion()
         
@@ -655,19 +663,25 @@ class ManualEditor(QWidget, EditorUI):
 
     def start_crop_session(self):
         """进入裁切模式"""
+        # 1. 核心修复：检查 pixmap_item 是否存在且是否有图片
+        if not hasattr(self, 'pixmap_item') or self.pixmap_item is None:
+            print("DEBUG: 画布为空，无法启动裁切")
+            # 强行把按钮弹回去
+            self.btn_cut.blockSignals(True)
+            self.btn_cut.setChecked(False)
+            self.btn_cut.blockSignals(False)
+            return
+            
         target_item = self.pixmap_item
-        if not target_item or not target_item.pixmap():
+        if not target_item.pixmap() or target_item.pixmap().isNull():
             return
         
-        # 获取图片在场景中的矩形
+        # 2. 正常启动逻辑
         image_rect = target_item.boundingRect()
-        
-        # 创建裁切框，传入场景范围（用于遮罩）和初始矩形
-        # 这里初始矩形建议比原图稍微小一点点，让用户看到手柄
-        self.crop_box = CropBoxItem(image_rect, image_rect)
+        # 传入当前场景范围和初始矩形
+        self.crop_box = CropBoxItem(self.scene.sceneRect(), image_rect)
         self.scene.addItem(self.crop_box)
         
-        # 禁用视图的拖拽模式，防止干扰
         self.view.setDragMode(ScalableView.NoDrag)
 
     def finish_crop_session(self):
@@ -682,6 +696,8 @@ class ManualEditor(QWidget, EditorUI):
             if not self.crop_box.scene(): 
                 self.crop_box = None
                 return
+
+            self.save_undo_state() #存档
 
             crop_rect = self.crop_box.rect().normalized().toRect()
             
@@ -722,10 +738,80 @@ class ManualEditor(QWidget, EditorUI):
             self.btn_cut.blockSignals(False)
             self.view.setDragMode(ScalableView.ScrollHandDrag)
     
+
+
+    def abort_crop_session(self):
+        """完全放弃裁切，不保存任何改动并清理 UI"""
+        if hasattr(self, 'crop_box') and self.crop_box:
+            try:
+                if self.crop_box.scene():
+                    self.scene.removeItem(self.crop_box)
+            except RuntimeError:
+                pass
+            self.crop_box = None
+            
+        self.btn_cut.blockSignals(True)
+        self.btn_cut.setChecked(False)
+        self.btn_cut.blockSignals(False)
+        self.view.setDragMode(ScalableView.ScrollHandDrag)
+
+    def save_undo_state(self):
+        """在任何修改操作（裁切、魔棒删除等）之前调用"""
+        if not hasattr(self, 'pixmap_item') or self.pixmap_item is None:
+            return
+            
+        current_pixmap = self.pixmap_item.pixmap()
+        if current_pixmap.isNull():
+            return
+            
+        # 将当前图元的副本加入栈（必须用副本，防止引用干扰）
+        self.undo_stack.append(current_pixmap.copy())
+        
+        # 如果超过 20 次，弹出最旧的一个
+        if len(self.undo_stack) > self.max_undo_steps:
+            self.undo_stack.pop(0)
+        
+        print(f"DEBUG: 已保存撤销点，当前步数: {len(self.undo_stack)}")
+
+    def undo(self):
+        """回退到上一个状态"""
+        if not self.undo_stack:
+            print("DEBUG: 没有可撤销的操作")
+            return
+            
+        # 弹出最后一张图
+        last_pixmap = self.undo_stack.pop()
+        
+        # 恢复图片
+        self.pixmap_item.setPixmap(last_pixmap)
+        self.pixmap_item.setPos(0, 0)
+        
+        # 同步更新场景和棋盘格（防止撤销的是裁切操作导致尺寸不对）
+        new_rect = QRectF(0, 0, last_pixmap.width(), last_pixmap.height())
+        self.scene.setSceneRect(new_rect)
+        if hasattr(self.view, 'checker_item') and self.view.checker_item:
+            self.view.checker_item.set_rect(new_rect)
+            
+        print(f"DEBUG: 已撤销，剩余步数: {len(self.undo_stack)}")
+    
     def keyPressEvent(self, event):
-        # 如果当前正在裁切模式（crop_box 存在）
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            if hasattr(self, 'crop_box') and self.crop_box:
-                self.finish_crop_session()
+        modifiers = event.modifiers()
+        is_ctrl = (modifiers & Qt.KeyboardModifier.ControlModifier) or \
+                  (modifiers & Qt.KeyboardModifier.MetaModifier)
+
+        # 1. 处理撤销 Ctrl+Z
+        if is_ctrl and event.key() == Qt.Key_Z:
+            self.undo()
+            return
+
+        # 2. 处理裁切模式下的快捷键
+        if hasattr(self, 'crop_box') and self.crop_box:
+            if event.key() == Qt.Key_Escape:
+                self.abort_crop_session() 
                 return
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self.finish_crop_session() 
+                return
+        
+        # 3. 其他默认处理
         super().keyPressEvent(event)
