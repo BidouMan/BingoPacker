@@ -383,7 +383,9 @@ class ManualEditor(QWidget, EditorUI):
 
     def handle_magic_wand_click(self, scene_pos):
         """
-        处理来自 ScalableView 的点击，根据当前 UI 配置执行魔棒算法
+        处理魔棒点击：
+        勾选连续 (isChecked) -> 只选相连的一坨
+        不勾选连续 -> 全图选所有颜色相近的点
         """
         # 1. 确定当前操作的图元
         target_item = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else None
@@ -397,25 +399,28 @@ class ManualEditor(QWidget, EditorUI):
         local_pos_f = target_item.mapFromScene(scene_pos)
         item_pos = local_pos_f.toPoint()
 
-        # 3. 边界检查
+        # 3. 边界检查与图像准备
         img = target_item.pixmap().toImage()
         if not img.rect().contains(item_pos):
             return
 
-        # 4. 从 UI 读取动态参数
-        # 读取滑动条的容差值
+        # 4. 【关键步骤】读取 UI 状态
+        # 你的需求：勾选了“连续” -> 选一坨 (contiguous=True)
+        #           没勾选“连续” -> 选全图 (contiguous=False)
+        is_contiguous_mode = self.check_contiguous.isChecked() 
+        
+        # 读取滑动条的实时容差值
         current_tolerance = self.slider_tolerance.value()
-        # 读取“连续”勾选框状态
-        is_contiguous = self.check_contiguous.isChecked()
 
         # 5. 配置并执行魔棒算法
         self.magic_wand.tolerance = current_tolerance
         
-        # 传入图像、点击点以及是否连续的布尔值
+        # 显式传入 is_contiguous_mode
+        # 注意：请确保 magic_wand.py 中的 get_selection_region 函数签名已更新为接收这个参数
         selection_region = self.magic_wand.get_selection_region(
             img, 
             item_pos, 
-            contiguous=is_contiguous
+            contiguous=is_contiguous_mode
         )
         
         # 6. 存储选区并触发蚂蚁线渲染

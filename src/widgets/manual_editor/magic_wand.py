@@ -26,6 +26,11 @@ class MagicWandTool:
         return distance <= self.tolerance
 
     def get_selection_region(self, image, start_point, contiguous=True):
+        """
+        执行魔棒算法
+        contiguous=True: 连续模式（只选粘在一起的）
+        contiguous=False: 全图模式（选所有颜色相近的）
+        """
         if image.isNull() or not image.rect().contains(start_point):
             return QRegion()
 
@@ -33,18 +38,18 @@ class MagicWandTool:
         width, height = img.width(), img.height()
         target_color = img.pixelColor(start_point)
         
-        # 创建一个单色掩码，确保初始为全黑 (0)
+        # 创建单色掩码，初始全黑(0)
         mask = QImage(img.size(), QImage.Format_Mono)
         mask.fill(0) 
 
         if not contiguous:
-            # --- 非连续模式：遍历全图 ---
+            # --- 全图模式：扫描每一个像素 ---
             for y in range(height):
                 for x in range(width):
                     if self.is_color_similar(target_color, img.pixelColor(x, y)):
                         mask.setPixel(x, y, 1)
         else:
-            # --- 连续模式：泛洪算法 ---
+            # --- 连续模式：泛洪算法 (保持你原有的逻辑) ---
             stack = [start_point]
             visited = set([(start_point.x(), start_point.y())])
             while stack:
@@ -59,19 +64,12 @@ class MagicWandTool:
                             visited.add((nx, ny))
                             stack.append(QPoint(nx, ny))
 
-        # --- 核心修复：更稳定的 QRegion 构造方案 ---
-        # 1. 将 mask 强制转换为 QBitmap
+        # 转换为 QRegion 并处理反向纠偏
         selection_bitmap = QBitmap.fromImage(mask)
-        
-        # 2. 从位图提取区域
         region = QRegion(selection_bitmap)
         
-        # 3. 终极逻辑检查：如果点击点 (start_point) 竟然不在结果区域内，说明 0/1 彻底反了
-        # 注意：这里不用 intersected 或 subtracted，直接利用 mask 的 setPixelColor 逻辑强制纠偏
+        # 纠偏：确保点击的点必须在选区内，如果不在，说明 0/1 填反了
         if not region.contains(start_point):
-            # 获取全图矩形区域
-            full_rect_region = QRegion(QRect(0, 0, width, height))
-            # 只有当 mask 填充的是“背景”时才执行取反
-            region = full_rect_region.subtracted(region)
+            region = QRegion(QRect(0, 0, width, height)).subtracted(region)
 
         return region.intersected(QRect(0, 0, width, height))
