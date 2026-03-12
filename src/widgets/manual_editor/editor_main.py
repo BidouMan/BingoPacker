@@ -139,59 +139,84 @@ class ManualEditor(QWidget, EditorUI):
             print(f"DEBUG [Editor]: 已同步素材 '{self.current_bundle.name}' (1帧, {pixmap.width()}x{pixmap.height()})")
 
     def on_do_slice(self):
-        """执行裁切并同步到预览"""
+        """
+        执行裁切并同步到预览
+        核心逻辑：原地更新模型数据，确保 AssetTree 和 PreviewPanel 的引用不丢失
+        """
+        # 1. 寻找画布上的底图（排除克隆体）
         bg_item = next((i for i in self.scene.items() 
                     if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-        if not bg_item: return
+        if not bg_item: 
+            return
 
+        # 2. 执行裁切逻辑（手动或自动）
         rects = self.selection_manager.get_sorted_selections()
         if rects:
+            # 手动裁切：根据用户画的框
             self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
+            # 自动裁切：识别透明像素
             self.current_frames = self.slice_logic.run_auto_slice_to_preview(bg_item.pixmap())
 
+        # 3. 如果裁切出了结果，开始同步数据模型
         if self.current_frames:
             if self.current_bundle:
-                from ...asset_model import FrameData
+                # from ...asset_model import FrameData
+                new_max = len(self.current_frames)
                 
-                # 1. 更新帧数据
+                # A. 更新帧数据列表
                 self.current_bundle.frames = [
                     FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}") 
                     for i, f in enumerate(self.current_frames)
                 ]
                 
-                # 2. 【新增】更新片段信息：将所有裁切出的帧定义为一个动画片段
-                # 这样 PreviewPanel 拿到后，看到 end > start 就会自动播放
-                self.current_bundle.segments = [
-                    {"name": "Animation", "start": 1, "end": len(self.current_frames)}
-                ]
-                
-                # 3. 发送内部信号更新资源表
+                if not self.current_bundle.segments:
+                    self.current_bundle.segments.clear()
+                    self.current_bundle.segments.append({"name": "Default", "start": 1, "end": new_max})
+                else:
+                    # 必须强制更新 Default 片段的值
+                    for s in self.current_bundle.segments:
+                        if s['name'] == "Default":
+                            s['start'] = 1
+                            s['end'] = new_max
+                            print(f"DEBUG [Editor]: 已强制重置 Default 片段为 1-{new_max}")
+
+                # C. 同步给全局
                 self.bundle_updated.emit(self.current_bundle)
                 
-                # 4. 【新增】触发全局预览同步
-                # 这会通过 BingoPacker 调用 preview_panel.start_segment_preview
+                # D. 通知全局预览窗口 (MainWindow 会调用 preview_panel.start_segment_preview)
                 self._sync_after_slice()
 
-            # --- 以下是原有的 UI 刷新逻辑 ---
+            # --- 4. UI 状态重置与画布渲染 ---
+            # 清理旧的预览 Item
             if self.preview_item:        
-                try: self.scene.removeItem(self.preview_item)
-                except: pass
+                try:
+                    self.scene.removeItem(self.preview_item)
+                except (RuntimeError, Exception):
+                    pass
                 self.preview_item = None
             
+            # 隐藏原始底图，清理选择框
             bg_item.setVisible(False)
             self.selection_manager.clear_selections()
             self.selection_manager.set_active(False)
 
+            # 强制刷新场景尺寸为第一帧的大小
             first_pix = self.current_frames[0]["pixmap"]
             new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
             self.scene.setSceneRect(new_rect)
+            
             if hasattr(self.view, 'checker_item'):
                 self.view.checker_item.set_rect(new_rect)
 
+            # 刷新左侧帧列表 UI
             self.update_frame_list_ui()
+
+            # 默认选中第一帧进行单帧预览
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
+            
+            print(f"DEBUG [Editor]: 裁切完成，共 {len(self.current_frames)} 帧，已同步至模型。")
 
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""

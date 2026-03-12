@@ -147,7 +147,7 @@ class PreviewPanel(QFrame):
         # 还原 ZIP 模式可能需要的路径 (兼容原有 toggle 逻辑)
         self.current_asset_path = bundle.path if hasattr(bundle, 'path') else None
 
-        self.title_label.setText(f"PREVIEW: {segment.get('name', 'Default')}")
+        # self.title_label.setText(f"PREVIEW: {segment.get('name', 'Default')}")
         self.render_current_frame()
         
         # 自动播放逻辑
@@ -194,11 +194,22 @@ class PreviewPanel(QFrame):
 
     def auto_next_frame(self):
         if not self.current_segment: return
-        start, end = self.current_segment.get('start', 1), self.current_segment.get('end', 1)
+        
+        # 直接从字典实时读取，这样你在 AssetTree 里改了 QLineEdit，这里下一秒就能读到
+        start = self.current_segment.get('start', 1)
+        end = self.current_segment.get('end', 1)
+        
         total = end - start + 1
         if total > 1:
+            # 实时计算索引
             self.current_frame_relative_idx = (self.current_frame_relative_idx + 1) % total
             self.render_current_frame()
+        else:
+            # 单帧情况
+            self.current_frame_relative_idx = 0
+            self.render_current_frame()
+            self.play_timer.stop()
+            self.update_play_button_icon(False)
 
     def button_connect(self):
         self.btns["play"].clicked.connect(self.toggle_play)
@@ -283,3 +294,27 @@ class PreviewPanel(QFrame):
         self.preview_screen.setText("<div style='color: #313244; text-align: center;'>▶<br>等待导入</div>")
         self.asset_tree.clear_all()
         self.update_play_button_icon(False)
+    
+    def update_segment_range(self, bundle, segment):
+        """当用户在树中修改起始/结束帧数字时，实时同步播放范围"""
+        # 如果是同一个片段，我们只更新范围，不重置当前帧索引
+        if self.current_bundle == bundle and self.current_segment == segment:
+            # 直接从 segment 字典读，因为 AssetTree 已经把新数字写进这个字典了
+            start = segment.get('start', 1)
+            end = segment.get('end', 1)
+            total = end - start + 1
+            if self.current_frame_relative_idx >= total:
+                self.current_frame_relative_idx = 0
+            
+            # 根据新范围决定是否开启播放
+            if total > 1 and not self.play_timer.isActive():
+                self.play_timer.start(1000 // max(1, self.speed_slider.value()))
+                self.update_play_button_icon(True)
+            elif total <= 1:
+                self.play_timer.stop()
+                self.update_play_button_icon(False)
+            
+            self.render_current_frame()
+        else:
+            # 如果切了不同的片段，走完整的初始化流程
+            self.start_segment_preview(bundle, segment)

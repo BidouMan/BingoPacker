@@ -36,40 +36,12 @@ class AssetTree(QTreeWidget):
 
     # --- 数据同步核心 ---
     def update_bundle_data(self, bundle):
-        """当编辑器裁切导致帧数变化时，强制刷新UI上的数字"""
         root = self._find_root_by_bundle(bundle)
         if not root: return
-
-        max_f = len(bundle.frames)
-        
-        # 遍历所有片段行
-        for i in range(root.childCount()):
-            child = root.child(i)
-            seg = child.data(0, Qt.UserRole)
-            
-            # --- 核心修正：确保结束帧正确且起始帧不越界 ---
-            # 如果是单图导入，max_f 为 1，则 end 应为 1
-            if seg['end'] < 1 or seg['end'] > max_f or (max_f > 1 and seg['end'] == 1):
-                seg['end'] = max_f
-            
-            # 确保 start 永远不大于 end
-            seg['start'] = max(1, min(seg['start'], seg['end']))
-            
-            # 获取该行挂载的自定义 Widget
-            widget = self.itemWidget(child, 0)
-            if widget:
-                # 通过 ObjectName 精确查找赋值
-                edit_s = widget.findChild(QLineEdit, "f_start")
-                edit_e = widget.findChild(QLineEdit, "f_end")
-                if edit_s and edit_e:
-                    edit_s.setText(str(seg['start']))
-                    edit_e.setText(str(seg['end']))
-
-        # 触发预览更新
-        if root.childCount() > 0:
-            first_child = root.child(0)
-            self.setCurrentItem(first_child)
-            self.segment_changed.emit(bundle, first_child.data(0, Qt.UserRole))
+        # 必须清空，否则每次裁切都会重复堆叠旧节点
+        root.takeChildren() 
+        for seg in bundle.segments:
+            self._add_segment_node(root, seg)
 
     # --- 节点创建 ---
     def add_bundle(self, bundle):
@@ -108,65 +80,113 @@ class AssetTree(QTreeWidget):
         return w
 
     def _add_segment_node(self, parent_item, seg_dict):
+        # 获取 bundle 引用
+        bundle = parent_item.data(0, Qt.UserRole)
         child = QTreeWidgetItem(parent_item)
-        child.setData(0, Qt.UserRole, seg_dict)
+        # 核心：将模型字典引用存储在 UserRole 中
+        child.setData(0, Qt.UserRole, seg_dict) 
+
+        # 名字修改回调：闭包内捕获 bundle 和 seg_dict
+        def update_name_callback(requested_name):
+            base = requested_name
+            final = base
+            counter = 1
+            # 查重：必须排除掉当前这个内存对象本身，否则改名会由于自己占用了名字而导致自动加后缀
+            others = [s['name'] for s in bundle.segments if s is not seg_dict]
+            while final in others:
+                final = f"{base}_{counter}"
+                counter += 1
+            
+            # 同步回原始字典
+            seg_dict['name'] = final
+            print(f"DEBUG [Model]: 名称同步 -> {final} (ID: {id(seg_dict)})")
+            return final
 
         w = QWidget(); w.setObjectName("ChildContainer")
         layout = QHBoxLayout(w); layout.setContentsMargins(24,0,10,0); layout.setSpacing(6)
         
-        name_stack = self._create_name_editor(seg_dict['name'], 90, lambda n: self._update_seg_data(child, 'name', n))
+        name_stack = self._create_name_editor(seg_dict['name'], 100, update_name_callback)
         
         digit_style = "background:#313244; color:#cdd6f4; border-radius:3px; font-size:11px;"
-        s_edit = QLineEdit(str(seg_dict['start']))
+        
+        # 核心改进：读取时使用 .get() 并设置默认值，增加鲁棒性
+        s_edit = QLineEdit(str(seg_dict.get('start', 1)))
         s_edit.setObjectName('f_start')
         s_edit.setFixedSize(32, 20); s_edit.setAlignment(Qt.AlignCenter); s_edit.setStyleSheet(digit_style)
         
-        e_edit = QLineEdit(str(seg_dict['end']))
+        e_edit = QLineEdit(str(seg_dict.get('end', 1)))
         e_edit.setObjectName('f_end')
         e_edit.setFixedSize(32, 20); e_edit.setAlignment(Qt.AlignCenter); e_edit.setStyleSheet(digit_style)
 
-        # 动态校验：直接在信号里读取 bundle.frames 长度，不再传递固定的 max_f
-        s_edit.editingFinished.connect(lambda: self._sync_fields(child, s_edit, e_edit))
-        e_edit.editingFinished.connect(lambda: self._sync_fields(child, s_edit, e_edit))
+        # 信号绑定：使用默认参数防止 Lambda 延迟绑定 Bug
+        s_edit.editingFinished.connect(lambda c=child, s=s_edit, e=e_edit: self._sync_fields(c, s, e))
+        e_edit.editingFinished.connect(lambda c=child, s=s_edit, e=e_edit: self._sync_fields(c, s, e))
 
-        layout.addWidget(QLabel("🎬")); layout.addWidget(name_stack); layout.addStretch()
-        layout.addWidget(s_edit); layout.addWidget(QLabel("-")); layout.addWidget(e_edit)
+        layout.addWidget(QLabel("🎬"))
+        layout.addWidget(name_stack)
+        layout.addStretch()
+        layout.addWidget(s_edit)
+        layout.addWidget(QLabel("-"))
+        layout.addWidget(e_edit)
         
         self.setItemWidget(child, 0, w)
         return child
 
     # --- 内部逻辑 ---
     def _sync_fields(self, item, s_edit, e_edit):
-        """动态获取当前 Bundle 的总帧数进行校验"""
-        # 1. 获取当前节点所属的 Bundle
-        bundle = item.parent().data(0, Qt.UserRole)
-        if not bundle: return
-        
-        seg = item.data(0, Qt.UserRole)
-        max_f = len(bundle.frames) # 关键：每次校验都读取最新的帧数
+        parent = item.parent()
+        if not parent: return
+        bundle = parent.data(0, Qt.UserRole)
+        seg = item.data(0, Qt.UserRole)  # 获取 UI 节点绑定的字典对象
+        max_f = len(bundle.frames)
 
         try:
-            s = int(s_edit.text())
-            e = int(e_edit.text())
+            # 1. 读取并校验数值
+            s = int(s_edit.text() if s_edit.text() else 1)
+            e = int(e_edit.text() if e_edit.text() else 1)
             
-            # 2. 严格限制范围
             s = max(1, min(s, max_f))
             e = max(1, min(e, max_f))
-            if s > e: s = e # 起始不能大于结束
+            if s > e: s = e
+
+            # 2. 【核心同步】原地修改字典引用
+            # 由于 seg 指向的就是 bundle.segments 里的某个字典，修改 seg 实际上就在改模型
+            seg['start'] = s
+            seg['end'] = e
             
-            # 3. 写回数据模型
-            seg['start'], seg['end'] = s, e
-            
-            # 4. 反馈回 UI 界面，确保数字整洁
+            # --- 强制安全检查：确保该对象确实在模型列表中 ---
+            # 如果 id 对不上，说明这是一个副本，我们需要把它同步回模型
+            if not any(x is seg for x in bundle.segments):
+                print("WARNING [AssetTree]: 检测到引用断裂，正在尝试通过索引修复...")
+                # 这种情况通常发生在 bundle.segments 被整体替换时
+                # 我们可以尝试通过 item 的 index 来寻找在模型中的对应位置
+                idx = parent.indexOfChild(item)
+                if 0 <= idx < len(bundle.segments):
+                    bundle.segments[idx]['start'] = s
+                    bundle.segments[idx]['end'] = e
+
+            # 3. 打印模型状态验证 (使用 ID 匹配标记)
+            status_list = [f"{'*' if x is seg else ''}{x['name']}:{x['start']}-{x['end']}" for x in bundle.segments]
+            print(f"DEBUG [Sync]: 片段 '{seg['name']}' 已更新 -> {s}-{e}")
+            print(f"      - 内存地址: {id(seg)}")
+            print(f"      - 模型状态: {status_list}")
+
+            # 4. 反馈回 UI (阻塞信号防止重复触发)
+            s_edit.blockSignals(True)
+            e_edit.blockSignals(True)
             s_edit.setText(str(s))
             e_edit.setText(str(e))
+            s_edit.blockSignals(False)
+            e_edit.blockSignals(False)
             
-            # 5. 发射信号通知预览面板刷新
+            # 5. 通知预览面板
+            # 只要数据改了，就发信号，让 PreviewPanel 自己判断是否需要重置播放进度
             self.segment_changed.emit(bundle, seg)
+
         except ValueError:
-            # 如果输入了非数字，恢复成模型里的旧值
-            s_edit.setText(str(seg['start']))
-            e_edit.setText(str(seg['end']))
+            # 输入非法字符时还原
+            s_edit.setText(str(seg.get('start', 1)))
+            e_edit.setText(str(seg.get('end', 1)))
 
     def _update_seg_data(self, item, key, val):
         seg = item.data(0, Qt.UserRole)
@@ -175,19 +195,73 @@ class AssetTree(QTreeWidget):
 
     def on_add_segment_clicked(self, parent_item):
         bundle = parent_item.data(0, Qt.UserRole)
-        new_seg = {"name": "新动画", "start": 1, "end": len(bundle.frames)}
-        bundle.segments.append(new_seg)
-        child = self._add_segment_node(parent_item, new_seg)
+        if not bundle: return
+
+        # --- 核心修复：自动查重并添加后缀 ---
+        base_name = "新动画"
+        final_name = base_name
+        counter = 1
+        
+        # 获取当前 bundle 中所有已存在的片段名称
+        existing_names = [s['name'] for s in bundle.segments]
+        
+        # 循环检查，如果重名则加后缀 _1, _2...
+        while final_name in existing_names:
+            final_name = f"{base_name}_{counter}"
+            counter += 1
+
+        # 1. 确保每次都是创建一个全新的 dict 对象，且名称唯一
+        new_data = {"name": final_name, "start": 1, "end": len(bundle.frames)}
+        
+        # 2. 存入模型（这是真值源）
+        bundle.segments.append(new_data)
+        
+        # 3. 关键：必须传入刚刚 append 进去的那个唯一对象引用
+        seg_ref = bundle.segments[-1] 
+        child = self._add_segment_node(parent_item, seg_ref)
+        
+        # 4. UI 自动展开并选中新节点
         parent_item.setExpanded(True)
         self.setCurrentItem(child)
+        
+        print(f"DEBUG [AssetTree]: 已新增唯一片段: {final_name}")
 
     def _handle_selection_event(self):
+        """处理树节点选中事件，实现点击即预览"""
         item = self.currentItem()
         if not item: return
+
         self._update_ui_states()
-        bundle = item.data(0, Qt.UserRole) if not item.parent() else item.parent().data(0, Qt.UserRole)
-        seg = item.data(0, Qt.UserRole) if item.parent() else item.child(0).data(0, Qt.UserRole)
-        if bundle and seg: self.segment_changed.emit(bundle, seg)
+
+        bundle = None
+        seg = None
+
+        if item.parent() is None:
+            bundle = item.data(0, Qt.UserRole)
+            if item.childCount() > 0:
+                item = item.child(0) # 自动重定向到第一个子片段
+                seg = item.data(0, Qt.UserRole)
+        else:
+            bundle = item.parent().data(0, Qt.UserRole)
+            seg = item.data(0, Qt.UserRole)
+
+        if bundle and seg:
+            # --- 核心改进：在发送信号前，强制从 UI 的 LineEdit 同步一次数据到字典 ---
+            # 这样即使用户没按回车直接点选了这一行，也能保证发送的是 UI 上的数字
+            widget = self.itemWidget(item, 0)
+            if widget:
+                s_edit = widget.findChild(QLineEdit, "f_start")
+                e_edit = widget.findChild(QLineEdit, "f_end")
+                if s_edit and e_edit:
+                    try:
+                        # 强制把 UI 上的值刷进字典
+                        seg['start'] = int(s_edit.text())
+                        seg['end'] = int(e_edit.text())
+                    except: pass
+
+            print(f"DEBUG [AssetTree]: 切换预览 -> 资源: {bundle.name}, 片段: {seg['name']} ({seg['start']}-{seg['end']})")
+            # 发送信号给 PreviewPanel
+            self.segment_changed.emit(bundle, seg)
 
     def _update_ui_states(self):
         """递归刷新所有节点的选中样式"""
@@ -200,12 +274,47 @@ class AssetTree(QTreeWidget):
         for i in range(self.topLevelItemCount()): update_node(self.topLevelItem(i))
 
     def _create_name_editor(self, text, width, callback):
-        stack = QStackedWidget(); stack.setFixedSize(width, 30)
-        lbl = QLabel(text); lbl.setObjectName("NameLabel")
+        """
+        带查重逻辑和实时模型同步的名称编辑器
+        """
+        stack = QStackedWidget()
+        stack.setFixedSize(width, 30)
+        
+        lbl = QLabel(text)
+        lbl.setObjectName("NameLabel")
+        
         edit = QLineEdit(text)
-        stack.addWidget(lbl); stack.addWidget(edit)
-        lbl.mouseDoubleClickEvent = lambda e: (edit.setText(lbl.text()), stack.setCurrentIndex(1), edit.setFocus())
-        edit.editingFinished.connect(lambda: (lbl.setText(edit.text()), stack.setCurrentIndex(0), callback(edit.text())))
+        stack.addWidget(lbl)
+        stack.addWidget(edit)
+
+        # 双击进入编辑模式
+        lbl.mouseDoubleClickEvent = lambda e: (
+            edit.setText(lbl.text()), 
+            stack.setCurrentIndex(1), 
+            edit.setFocus()
+        )
+
+        def on_finished():
+            # 1. 获取新名称并清理空格
+            new_name = edit.text().strip()
+            old_name = lbl.text()
+
+            # 2. 如果名字没变，直接切回
+            if not new_name or new_name == old_name:
+                stack.setCurrentIndex(0)
+                return
+
+            # 3. 切回显示模式
+            stack.setCurrentIndex(0)
+            
+            # 4. 执行回调（该回调会负责查重并写入模型）
+            # callback 内部会修改字典的 'name' 键，并可能返回最终唯一化的名字
+            final_name = callback(new_name)
+            
+            # 5. 更新 Label 显示（以最终查重后的名字为准）
+            lbl.setText(final_name)
+            
+        edit.editingFinished.connect(on_finished)
         return stack
 
     def _find_root_by_bundle(self, bundle):

@@ -157,6 +157,7 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.btn_sprite.clicked.connect(self.handle_export_sprite_request)
 
         self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
+        self.preview_panel.asset_tree.segment_changed.connect(self.preview_panel.update_segment_range)
 
     def on_editor_bundle_changed(self, bundle):
         """处理来自 ManualEditor 的素材同步"""
