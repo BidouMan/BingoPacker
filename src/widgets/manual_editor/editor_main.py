@@ -41,6 +41,12 @@ class ManualEditor(QWidget, EditorUI):
         # 增加快捷键
         self.shortcut_deselect = QShortcut(QKeySequence("Ctrl+D"), self)
         self.shortcut_deselect.activated.connect(self.deselect_all)
+        self.shortcut_delete = QShortcut(QKeySequence(Qt.Key_Delete), self)
+        self.shortcut_delete.activated.connect(self.delete_selected_pixels)
+        
+        # 为了兼容 Mac 键盘，建议同时绑定 Backspace
+        self.shortcut_backspace = QShortcut(QKeySequence(Qt.Key_Backspace), self)
+        self.shortcut_backspace.activated.connect(self.delete_selected_pixels)
 
         self.connect_signals()
 
@@ -520,4 +526,64 @@ class ManualEditor(QWidget, EditorUI):
         if hasattr(self, 'selection_manager'):
             self.selection_manager.clear_selections()
             print("DEBUG [Editor]: 已通过快捷键清空矩形选区")
+    
+    def delete_selected_pixels(self):
+        """核心功能：将选区内的像素变为透明"""
+        # 1. 确定我们要操作的底图图元
+        target_item = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else None
+        if not target_item and hasattr(self, 'pixmap_item'):
+            target_item = self.pixmap_item
+
+        if not target_item or not target_item.pixmap():
+            return
+
+        # 2. 构造最终的像素级选区 (QRegion)
+        final_region = QRegion()
+        
+        # 叠加魔棒选区 (魔棒选区已经是基于图片像素坐标的)
+        if self.selection_mask and not self.selection_mask.isEmpty():
+            final_region += self.selection_mask
+            
+        # 叠加矩形选区 (需要从场景坐标转为图元本地像素坐标)
+        if hasattr(self, 'selection_manager'):
+            for item in self.selection_manager.selections:
+                # 转换场景矩形到图元本地坐标
+                local_rect_f = target_item.mapFromScene(item.rect()).boundingRect()
+                final_region += QRegion(local_rect_f.toRect())
+
+        if final_region.isEmpty():
+            print("DEBUG [Editor]: 选区为空，跳过删除")
+            return
+
+        # 3. 执行像素擦除
+        original_pixmap = target_item.pixmap()
+        new_pixmap = QPixmap(original_pixmap.size())
+        new_pixmap.fill(Qt.GlobalColor.transparent) # 先填透明
+        
+        painter = QPainter(new_pixmap)
+        # 先把原图画上去
+        painter.drawPixmap(0, 0, original_pixmap)
+        
+        # 设置模式为 Clear (擦除模式)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        
+        # 【关键修复】使用正确的迭代方式遍历 QRegion
+        for rect in final_region:
+            painter.fillRect(rect, Qt.GlobalColor.transparent)
+        
+        painter.end()
+
+        # 4. 更新 UI 显示
+        target_item.setPixmap(new_pixmap)
+        
+        # 5. 如果是初次加载的底图，同步更新到 Bundle 数据模型
+        if target_item == getattr(self, 'pixmap_item', None):
+            if self.current_bundle:
+                self.current_bundle.original_pixmap = new_pixmap
+                if self.current_bundle.frames:
+                    self.current_bundle.frames[0].pixmap = new_pixmap
+
+        # 6. 清理选区和蚂蚁线
+        self.deselect_all()
+        print("DEBUG [Editor]: 像素删除成功，已刷新显示")
     
