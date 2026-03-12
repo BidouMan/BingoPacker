@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem
 from PySide6.QtCore import Qt, QRectF, Signal, QSize,QPoint
-from PySide6.QtGui import QPixmap, QIcon, QPainter,QPainterPath,QColor,QPen,QRegion
+from PySide6.QtGui import QPixmap, QIcon, QPainter,QPainterPath,QColor,QPen,QRegion,QShortcut, QKeySequence,QCursor
 
 from .editor_ui import EditorUI
 from .scalable_view import ScalableView, CheckerboardItem
@@ -37,6 +37,11 @@ class ManualEditor(QWidget, EditorUI):
         # 把 manager 引用塞进 view 里面，否则 view 里的 hasattr(self, 'selection_manager') 永远是 False
         self.view.selection_manager = self.selection_manager
         self.setAcceptDrops(True)
+
+        # 增加快捷键
+        self.shortcut_deselect = QShortcut(QKeySequence("Ctrl+D"), self)
+        self.shortcut_deselect.activated.connect(self.deselect_all)
+
         self.connect_signals()
 
     # --- 核心：数据驱动的属性拦截 ---
@@ -491,22 +496,40 @@ class ManualEditor(QWidget, EditorUI):
     
     def on_magic_wand_toggled(self, checked):
         """当魔棒按钮状态切换时触发"""
+        from PySide6.QtWidgets import QGraphicsView # 确保导入了 QGraphicsView
+        
         if checked:
-            # 1. 设置鼠标样式为十字准星 (或者自定义魔棒图标)
-            self.view.setCursor(Qt.CursorShape.CrossCursor)
+            # 1. 强制关闭手掌模式：这一步最关键
+            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
             
-            # 2. 如果开启了魔棒，通常要暂时禁用普通的矩形选取框逻辑
+            # 2. 设置光标：使用 Qt.CrossCursor (或者 Qt.CursorShape.CrossCursor)
+            # 如果想更明显一点，可以用 Qt.CursorShape.PointingHandCursor 试试
+            self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            
+            # 3. 禁用其他选框逻辑
             self.selection_manager.set_active(False)
-            # 确保其他的按钮弹起（如果你用了 QButtonGroup，这步自动完成）
             
-            print("DEBUG [Editor]: 已进入魔棒模式")
+            print("DEBUG [Editor]: 已进入魔棒模式，禁用拖拽，光标设为十字")
         else:
-            # 1. 恢复标准箭头鼠标
-            self.view.unsetCursor()
+            # 1. 恢复手掌模式
+            self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             
-            # 2. 清理当前的魔棒选区遮罩（可选，看你是否想保留显示）
-            # self.selection_mask = None
-            # self.view.viewport().update()
+            # 2. 恢复默认光标
+            self.view.viewport().unsetCursor()
             
-            print("DEBUG [Editor]: 已退出魔棒模式")
+            print("DEBUG [Editor]: 已退出魔棒模式，恢复手掌拖拽")
+    
+    def deselect_all(self):
+        """取消选择：同时清理魔棒选区和手动矩形选区"""
+        # 1. 清理魔棒选区
+        if self.selection_mask:
+            from PySide6.QtGui import QRegion
+            self.selection_mask = None
+            self.update_selection_display(QRegion()) # 传入空选区会触发我们写好的清理逻辑
+            print("DEBUG [Editor]: 已通过快捷键清空魔棒选区")
+
+        # 2. 清理手动绘制的矩形选区 (SelectionManager)
+        if hasattr(self, 'selection_manager'):
+            self.selection_manager.clear_selections()
+            print("DEBUG [Editor]: 已通过快捷键清空矩形选区")
     
