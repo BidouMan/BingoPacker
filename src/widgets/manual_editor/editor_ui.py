@@ -42,20 +42,22 @@ class EditorUI:
         toolbar_layout.setContentsMargins(5, 0, 5, 0)
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
+
         self.btn_new_file = self._create_tool_btn("btn_new_file",'新建')
         self.btn_save = self._create_tool_btn("btn_save", "保存")
+        self.btn_magic_wand = self._create_tool_btn("btn_magic_wand", "选取", checkable=True)
         self.btn_pick = self._create_tool_btn("btn_pick", "选取", checkable=True)
-        self.btn_pick.setCheckable(True)
         self.btn_slice = self._create_tool_btn("on_slice_clicked", "裁切", checkable=True)
-        self.btn_slice.setCheckable(True)
         self.btn_clear = QPushButton("清空")
 
         self.tool_group = QButtonGroup(widget)
+        self.tool_group.addButton(self.btn_magic_wand)
         self.tool_group.addButton(self.btn_pick)
         self.tool_group.addButton(self.btn_slice)
 
         toolbar_layout.addWidget(self.btn_new_file)
         toolbar_layout.addWidget(self.btn_save)
+        toolbar_layout.addWidget(self.btn_magic_wand)
         toolbar_layout.addWidget(self.btn_pick)
         toolbar_layout.addWidget(self.btn_slice)
         toolbar_layout.addWidget(self.btn_clear)

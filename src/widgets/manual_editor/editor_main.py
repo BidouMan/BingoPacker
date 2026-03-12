@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsPixmapItem, QListWidgetItem
-from PySide6.QtCore import Qt, QRectF, Signal, QSize
-from PySide6.QtGui import QPixmap, QIcon, QPainter
+from PySide6.QtCore import Qt, QRectF, Signal, QSize,QPoint
+from PySide6.QtGui import QPixmap, QIcon, QPainter,QPainterPath,QColor,QPen,QRegion
 
 from .editor_ui import EditorUI
 from .scalable_view import ScalableView, CheckerboardItem
@@ -9,6 +9,7 @@ from .selection_manager import SelectionManager
 from ...logic_slice import SliceLogic
 from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
+from .magic_wand import MagicWandTool
 
 class ManualEditor(QWidget, EditorUI):
     slice_completed = Signal(str, list)
@@ -22,6 +23,8 @@ class ManualEditor(QWidget, EditorUI):
         self.current_frames = []
         self.current_source_path = None
         self.preview_item = None
+        self.magic_wand = MagicWandTool(tolerance=15)
+        self.selection_mask = None # 存储当前的选区
         
         # 初始化 UI
         self.setup_ui(self)
@@ -51,6 +54,7 @@ class ManualEditor(QWidget, EditorUI):
     def connect_signals(self):
         # 确保 UI 中的所有按钮都正确绑定
         self.btn_new_file.clicked.connect(self.clear_all)
+        self.btn_magic_wand.toggled.connect(self.on_magic_wand_toggled)
         self.btn_pick.toggled.connect(self.selection_manager.set_active)
         self.btn_slice.clicked.connect(self.on_do_slice)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
@@ -59,6 +63,8 @@ class ManualEditor(QWidget, EditorUI):
 
     def display_image(self, file_path):
         if not os.path.exists(file_path): return
+        self.update_selection_display(QRegion())
+
         pixmap = QPixmap(file_path)
         if pixmap.isNull(): return
 
@@ -281,6 +287,7 @@ class ManualEditor(QWidget, EditorUI):
     def clear_all(self):
         """完全清空编辑器状态并重置全局环境"""
         # 1. 清理数据管理层 (核心：防止 AssetTree 残留)
+        self.update_selection_display(QRegion())
         self.asset_manager.clear_all()
         
         # 2. 清理编辑器内部变量
@@ -306,6 +313,7 @@ class ManualEditor(QWidget, EditorUI):
     
     def import_project_file(self, file_path):
         """导入并还原工程文件数据到编辑器 UI"""
+        self.update_selection_display(QRegion())
         self.asset_manager.clear_all()
 
         # 1. 使用 AssetManager 解析模型
@@ -345,3 +353,160 @@ class ManualEditor(QWidget, EditorUI):
 
         # 7. 触发全局同步信号，通知 AssetTree 刷新片段
         self.bundle_updated.emit(self.current_bundle)
+    
+    def get_canvas_coordinates(self, pos):
+        """将视图坐标转换为场景(图片)坐标"""
+        # 这里的 self.view 是 ScalableView 实例
+        scene_pos = self.view.mapToScene(pos)
+        return QPoint(int(scene_pos.x()), int(scene_pos.y()))
+
+    def handle_magic_wand_click(self, scene_pos):
+        """
+        处理来自 ScalableView 的点击 (传进来的是场景坐标)
+        """
+        # 1. 确定当前操作的图元 (优先预览图元，其次是原始图元)
+        target_item = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else None
+        if not target_item and hasattr(self, 'pixmap_item'):
+            target_item = self.pixmap_item
+
+        if not target_item or not target_item.pixmap():
+            return
+
+        # 2. 【核心修复】将场景坐标转换为图元内部的像素坐标
+        # 这是为了解决图片在场景中被移动（Pos不为0）或缩放后的坐标偏移问题
+        local_pos_f = target_item.mapFromScene(scene_pos)
+        item_pos = local_pos_f.toPoint()
+
+        # 3. 获取 QImage 进行边界检查
+        img = target_item.pixmap().toImage()
+        if not img.rect().contains(item_pos):
+            print(f"DEBUG [Editor]: 点击位置 {item_pos.x()},{item_pos.y()} 越界，不在图片范围内")
+            return
+
+        # 打印调试信息，确认点击的颜色是否符合预期
+        pixel_color = img.pixelColor(item_pos)
+        print(f"DEBUG [Editor]: 点击像素点({item_pos.x()}, {item_pos.y()}) "
+              f"颜色为: RGBA({pixel_color.red()}, {pixel_color.green()}, "
+              f"{pixel_color.blue()}, {pixel_color.alpha()})")
+
+        # 如果点到了几乎透明的地方，通常泛洪会填满整个背景，这里可以做个预防
+        if pixel_color.alpha() < 5:
+            print("DEBUG [Editor]: 警告：点击了透明区域，可能会选中整个背景。")
+
+        # 4. 执行魔棒算法
+        # 建议：如果之前红橙不分，可以将 tolerance 调低到 10-20
+        self.magic_wand.tolerance = 20 
+        
+        # 传入 img 和精准的 item_pos
+        selection_region = self.magic_wand.get_selection_region(img, item_pos)
+        
+        # 5. 存储并渲染
+        # 这里存储的是相对于图片坐标系的 QRegion
+        self.selection_mask = selection_region
+        self.update_selection_display(selection_region)
+
+    def update_selection_display(self, region):
+        """专业版：带安全生命周期管理的动态蚂蚁线"""
+        
+        # 定义内部清理函数，防止代码重复
+        def clear_ants():
+            if hasattr(self, 'ants_timer') and self.ants_timer:
+                self.ants_timer.stop()
+                self.ants_timer.deleteLater()
+                self.ants_timer = None
+            if hasattr(self, 'temp_mask_item') and self.temp_mask_item:
+                try:
+                    self.scene.removeItem(self.temp_mask_item)
+                except: pass
+                self.temp_mask_item = None
+                self.ants_layer = None
+
+        if region.isEmpty():
+            clear_ants()
+            return
+
+        # 1. 路径处理
+        path = QPainterPath()
+        path.addRegion(region)
+        simplified_path = path.simplified()
+
+        # 2. 初始化或重置 Item
+        # 注意：如果已经报错了，我们强制重新创建
+        is_deleted = False
+        if hasattr(self, 'ants_layer') and self.ants_layer:
+            try:
+                # 测试 C++ 对象是否还活着
+                _ = self.ants_layer.scene()
+            except RuntimeError:
+                is_deleted = True
+
+        if not hasattr(self, 'temp_mask_item') or not self.temp_mask_item or is_deleted:
+            clear_ants() # 确保旧的完全清理
+            
+            from PySide6.QtWidgets import QGraphicsPathItem
+            from PySide6.QtCore import QTimer
+            
+            self.temp_mask_item = QGraphicsPathItem() 
+            self.ants_layer = QGraphicsPathItem(self.temp_mask_item) 
+            self.scene.addItem(self.temp_mask_item)
+            
+            self.ants_timer = QTimer(self)
+            self.ants_offset = 0
+            
+            def animate():
+                # 安全检查：如果对象被销毁了，立即停止定时器
+                try:
+                    if self.ants_layer:
+                        self.ants_offset = (self.ants_offset + 1) % 20
+                        p = self.ants_layer.pen()
+                        p.setDashOffset(self.ants_offset)
+                        self.ants_layer.setPen(p)
+                except (RuntimeError, AttributeError):
+                    if hasattr(self, 'ants_timer') and self.ants_timer:
+                        self.ants_timer.stop()
+
+            self.ants_timer.timeout.connect(animate)
+            self.ants_timer.start(60)
+
+        # 3. 设置样式 (保持之前的 2 像素加粗)
+        line_width = 2
+        w_pen = QPen(QColor(255, 255, 255), line_width)
+        w_pen.setCosmetic(True)
+        self.temp_mask_item.setPath(simplified_path)
+        self.temp_mask_item.setPen(w_pen)
+
+        b_pen = QPen(QColor(0, 0, 0), line_width)
+        b_pen.setDashPattern([6, 6])
+        b_pen.setCosmetic(True)
+        self.ants_layer.setPath(simplified_path)
+        self.ants_layer.setPen(b_pen)
+
+        self.temp_mask_item.setZValue(9999)
+
+        # 4. 坐标同步
+        target = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else self.pixmap_item
+        if target:
+            self.temp_mask_item.setPos(target.pos())
+            self.temp_mask_item.setTransform(target.transform())
+    
+    def on_magic_wand_toggled(self, checked):
+        """当魔棒按钮状态切换时触发"""
+        if checked:
+            # 1. 设置鼠标样式为十字准星 (或者自定义魔棒图标)
+            self.view.setCursor(Qt.CursorShape.CrossCursor)
+            
+            # 2. 如果开启了魔棒，通常要暂时禁用普通的矩形选取框逻辑
+            self.selection_manager.set_active(False)
+            # 确保其他的按钮弹起（如果你用了 QButtonGroup，这步自动完成）
+            
+            print("DEBUG [Editor]: 已进入魔棒模式")
+        else:
+            # 1. 恢复标准箭头鼠标
+            self.view.unsetCursor()
+            
+            # 2. 清理当前的魔棒选区遮罩（可选，看你是否想保留显示）
+            # self.selection_mask = None
+            # self.view.viewport().update()
+            
+            print("DEBUG [Editor]: 已退出魔棒模式")
+    

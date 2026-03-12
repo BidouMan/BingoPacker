@@ -71,6 +71,17 @@ class ScalableView(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             return
 
+        editor = self.parent() # 或者通过引用的方式获取 editor
+        if hasattr(editor, 'btn_magic_wand') and editor.btn_magic_wand.isChecked():
+            if event.button() == Qt.MouseButton.LeftButton:
+                # 转换坐标
+                local_pos = self.get_canvas_coordinates(event.pos())
+                
+                # 调用 editor 的魔棒处理逻辑
+                if hasattr(editor, 'handle_magic_wand_click'):
+                    editor.handle_magic_wand_click(local_pos)
+                return
+
         # 2. 选取模式转发
         if hasattr(self, 'selection_manager') and self.selection_manager.active:
             if event.button() == Qt.MouseButton.LeftButton:
@@ -128,6 +139,15 @@ class ScalableView(QGraphicsView):
             self.selection_manager.handle_double_click(scene_pos)
             return
         super().mouseDoubleClickEvent(event)
+
+    def get_canvas_coordinates(self, pos):
+        """将鼠标相对于窗口的坐标转换为相对于图片的像素坐标"""
+        # 1. 映射到场景坐标
+        scene_pos = self.mapToScene(pos)
+        
+        # 2. 如果场景中有底图 (pixmap_item)，则转换为底图的局部像素坐标
+        # 假设 ManualEditor 在加载图片时将 pixmap_item 放在了 (0,0)
+        return QPoint(int(scene_pos.x()), int(scene_pos.y()))
 
 class CheckerboardItem(QGraphicsItem):
     def __init__(self, rect=QRectF()):
