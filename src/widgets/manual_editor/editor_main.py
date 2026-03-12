@@ -74,6 +74,9 @@ class ManualEditor(QWidget, EditorUI):
 
         # 魔棒工具按钮功能
         self.slider_tolerance.valueChanged.connect(self._on_tolerance_changed)
+        self.btn_expand.clicked.connect(self.on_expand_selection)
+        self.btn_shrink.clicked.connect(self.on_shrink_selection)
+        self.btn_invert.clicked.connect(self.on_invert_selection)
     
     def _on_tolerance_changed(self, value):
         """同步显示百分比并更新魔棒工具的内部容差值"""
@@ -600,4 +603,29 @@ class ManualEditor(QWidget, EditorUI):
         # 6. 清理选区和蚂蚁线
         self.deselect_all()
         print("DEBUG [Editor]: 像素删除成功，已刷新显示")
+    
+    def on_expand_selection(self):
+        if self.selection_mask:
+            r = self.selection_mask
+            # 向四周位移 1 像素并合并，实现外扩
+            self.selection_mask = r | r.translated(1,0) | r.translated(-1,0) | r.translated(0,1) | r.translated(0,-1)
+            self.update_selection_display(self.selection_mask)
+
+    def on_shrink_selection(self):
+        if self.selection_mask:
+            r = self.selection_mask
+            # 只有上下左右都在原选区内的像素才保留，实现向内塌陷
+            self.selection_mask = r.intersected(r.translated(1,0)) \
+                                   .intersected(r.translated(-1,0)) \
+                                   .intersected(r.translated(0,1)) \
+                                   .intersected(r.translated(0,-1))
+            self.update_selection_display(self.selection_mask)
+
+    def on_invert_selection(self):
+        # 反选逻辑
+        target_item = self.preview_item if (self.preview_item and self.preview_item.isVisible()) else self.pixmap_item
+        if target_item:
+            full_rect = QRegion(target_item.pixmap().rect())
+            self.selection_mask = full_rect.subtracted(self.selection_mask) if self.selection_mask else full_rect
+            self.update_selection_display(self.selection_mask)
     
