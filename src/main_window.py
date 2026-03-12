@@ -164,6 +164,7 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         # 1. 更新左侧树 (确保洛克人出现在树里)
         tree = self.preview_panel.asset_tree
         root = tree._find_root_by_bundle(bundle)
+        tree.reset_with_bundle(bundle)
         if not root:
             tree.add_bundle(bundle)
         else:

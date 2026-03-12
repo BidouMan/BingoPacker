@@ -331,3 +331,8 @@ class AssetTree(QTreeWidget):
             bundle = item.parent().data(0, Qt.UserRole)
             bundle.segments.remove(item.data(0, Qt.UserRole))
             item.parent().removeChild(item)
+
+    def reset_with_bundle(self, bundle):
+        """清空所有节点并只显示当前这一个 bundle"""
+        self.clear() # 清空 QTreeWidget 所有项
+        self.add_bundle(bundle)

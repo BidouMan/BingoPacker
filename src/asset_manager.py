@@ -133,26 +133,59 @@ class AssetManager:
         bundle.segments = [{"name": "Sequence", "start": 1, "end": len(bundle.frames)}]
         return bundle
 
+    def load_asset(self, path):
+        """统一入口：根据后缀名决定解析方式"""
+        if not os.path.exists(path): return None
+        
+        ext = os.path.splitext(path)[1].lower()
+        try:
+            if ext == '.bgs':
+                bundle = self._parse_bgs(path)
+            elif ext == '.sprite3':
+                bundle = self._parse_sprite3(path)
+            elif ext in ['.png', '.jpg', '.jpeg']:
+                bundle = self._parse_single_image(path)
+            else:
+                return None
+            
+            # 注册到管理仓库中，确保名字唯一
+            if bundle:
+                self.register_asset(bundle)
+                return bundle
+        except Exception as e:
+            print(f"DEBUG [AssetManager]: 加载失败 {path} -> {str(e)}")
+            return None
+
     # --- 内部私有适配器 ---
 
     def _parse_bgs(self, path):
-        """处理 .bgs 压缩包"""
+        """解析导出的 .bgs 工程文件 (ZIP格式)"""
         with zipfile.ZipFile(path, 'r') as z:
+            # 1. 读取配置文件
+            if 'config.json' not in z.namelist():
+                raise Exception("无效的 .bgs 文件：缺少 config.json")
+                
             with z.open('config.json') as f:
-                content = f.read().decode('utf-8')
-                data = json.loads(content)
-                
-                bundle = AssetBundle(data['name'])
-                bundle.path = path
-                
-                for img_name in data.get('frames', []):
-                    img_data = z.read(img_name)
+                data = json.loads(f.read().decode('utf-8'))
+            
+            # 2. 初始化 Bundle
+            bundle = AssetBundle(data['name'])
+            bundle.path = path
+            bundle.is_memory = False # 标记为磁盘导入
+            
+            # 3. 按顺序还原帧数据 (必须对应 frames 列表中的顺序)
+            for f_name in data.get('frames', []):
+                if f_name in z.namelist():
+                    img_data = z.read(f_name)
                     pix = QPixmap()
                     pix.loadFromData(img_data)
-                    bundle.frames.append(FrameData(pix, pix.rect(), img_name))
-                
-                bundle.segments = data.get('segments', [])
-                return bundle
+                    # 还原帧模型，这里 rect 可以设为 pix.rect()，因为导出时已经是裁切好的
+                    bundle.frames.append(FrameData(pix, pix.rect(), f_name))
+            
+            # 4. 还原片段定义
+            bundle.segments = data.get('segments', [])
+            
+            return bundle
 
     def _parse_sprite3(self, path):
         """处理 Scratch 的 .sprite3 压缩包"""

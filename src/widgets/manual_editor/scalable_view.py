@@ -33,29 +33,29 @@ class ScalableView(QGraphicsView):
 
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
-            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-                # 寻找 ManualEditor
-                target = self.parent()
-                while target and not hasattr(target, 'display_image'):
-                    target = target.parent()
-                
-                if target:
-                    # 1. 让编辑器显示图
-                    target.display_image(path)
-                    
-                    # 2. 【新增】寻找 MainWindow 并触发全局导入逻辑
-                    # 这样能保证左侧树和右侧预览同步更新
-                    win = target.parent()
-                    while win and win.__class__.__name__ != "BingoPacker": # 替换为你主窗口类名
-                        win = win.parent()
-                    
-                    # if win:
-                    #     # 强行调用你 MainWindow 里的处理函数
-                    #     win.handle_single_import(path) 
-                    
-                    event.acceptProposedAction()
+        if not urls: return
+        
+        path = urls[0].toLocalFile()
+        ext = path.lower()
+
+        # 寻找 ManualEditor (向上查找容器)
+        target = self.parent()
+        while target and not hasattr(target, 'display_image'):
+            target = target.parent()
+        
+        if not target: return
+
+        # --- 核心分流逻辑 ---
+        if ext.endswith(('.bgs', '.sprite3')):
+            # 如果是工程文件，调用我们新增的 import_project_file
+            if hasattr(target, 'import_project_file'):
+                target.import_project_file(path)
+                event.acceptProposedAction()
+        
+        elif ext.endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
+            # 如果是单图，走原有逻辑
+            target.display_image(path)
+            event.acceptProposedAction()
 
     def wheelEvent(self, event: QWheelEvent):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8

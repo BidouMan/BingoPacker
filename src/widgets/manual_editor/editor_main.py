@@ -284,3 +284,45 @@ class ManualEditor(QWidget, EditorUI):
         self.scene.clear()
         self.frame_list.clear()
         self.current_frames = []
+    
+    def import_project_file(self, file_path):
+        """导入并还原工程文件数据到编辑器 UI"""
+        self.asset_manager.clear_all()
+
+        # 1. 使用 AssetManager 解析模型
+        new_bundle = self.asset_manager.load_from_file(file_path)
+        if not new_bundle: return
+
+        # 2. 更新当前编辑对象并记录路径
+        self.current_bundle = new_bundle
+        self.current_source_path = file_path
+
+        # 3. 还原 current_frames 数据供编辑器内部渲染
+        self.current_frames = [
+            {"pixmap": f.pixmap, "rect": f.rect} 
+            for f in new_bundle.frames
+        ]
+
+        # 4. UI 深度重置
+        self.frame_list.blockSignals(True)
+        self.scene.clear()
+        self.preview_item = None
+        
+        # 5. 重建左侧缩略图 UI
+        self.update_frame_list_ui()
+
+        # 6. 还原画布状态
+        if self.current_frames:
+            first_pix = self.current_frames[0]["pixmap"]
+            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            self.scene.setSceneRect(new_rect)
+            # 这里的 checker_item 处理逻辑参考 scalable_view.py
+            self.view.checker_item = CheckerboardItem(new_rect)
+            self.scene.addItem(self.view.checker_item)
+            
+            self.frame_list.blockSignals(False)
+            self.frame_list.setCurrentRow(0)
+            self.switch_frame_preview(0) 
+
+        # 7. 触发全局同步信号，通知 AssetTree 刷新片段
+        self.bundle_updated.emit(self.current_bundle)
