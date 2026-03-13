@@ -1,21 +1,27 @@
 import os
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QPushButton, QTextEdit, QLabel, QStackedWidget)
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QIcon, QTextCursor, QTextBlockFormat, QTextCharFormat,QColor
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTextEdit,
+    QStackedWidget,
+)
+from PySide6.QtGui import QIcon
 
 from .utils import get_resource_path
 from .widgets.preview_panel import PreviewPanel
-from .logic_upload import UploadLogic 
+
 from .logic_export import ExportLogic
 from .logic_slice import SliceLogic
 from .widgets.manual_editor import ManualEditor
 from .asset_manager import AssetManager
-from .asset_model import FrameData,AssetBundle
 
-class BingoPacker(QMainWindow, ExportLogic,SliceLogic): 
+
+class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
     def __init__(self):
-        super().__init__()        
+        super().__init__()
         self.init_ui()
         self.connect_signals()
 
@@ -24,9 +30,9 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         # 考虑到常驻预览面板 (280px)，主窗口总宽度设为 1040 (760+280)
         self.setFixedWidth(1040)
         self.setFixedHeight(620)
-        
+
         # --- One Dark 风格配色方案 ---
-        # 背景: #282c34 | 容器: #21252b | 边框: #3e4451 
+        # 背景: #282c34 | 容器: #21252b | 边框: #3e4451
         # 蓝色: #61afef | 灰色文本: #abb2bf | 悬停: #30353f
         self.setStyleSheet("""
             QMainWindow, QWidget { 
@@ -79,11 +85,11 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
         # --- 核心切换容器 ---
         self.left_stack = QStackedWidget()
-        
+
         # 页面 0: Console
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        
+
         self.console.setPlaceholderText("-> 批量导入资源...")
         # 控制台文本颜色微调，更具代码感
         self.console.setStyleSheet("""
@@ -100,10 +106,10 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         self.left_stack.addWidget(self.editor_page)
 
         main_layout.addWidget(self.left_stack)
-        
+
         # 默认启动进入编辑器
         self.left_stack.setCurrentIndex(1)
-        
+
         self.setup_bottom_buttons(main_layout)
         self.global_layout.addWidget(self.main_container)
 
@@ -115,49 +121,54 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
     def setup_bottom_buttons(self, layout):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
-        
+
         # 定义按钮 - 严格还原原始颜色和图标名
         self.btn_upload = self.make_btn(" 导入", "#313244", "#89b4fa", "pick_folders")
         self.btn_clear = self.make_btn(" 清空", "#313244", "#89b4fa", "clear_all")
-        self.btn_editor = self.make_btn(' 编辑',"#313244", "#89b4fa", "btn_editor")
-        self.btn_slice = self.make_btn(" 裁切", "#313244", "#89b4fa", "on_slice_clicked")
+        self.btn_editor = self.make_btn(" 编辑", "#313244", "#89b4fa", "btn_editor")
+        self.btn_slice = self.make_btn(
+            " 裁切", "#313244", "#89b4fa", "on_slice_clicked"
+        )
 
-        
         self.btn_bgs = self.make_btn("导出 .bgs", "#45b573", "#58ce87")
         self.btn_sprite = self.make_btn("导出 .sprite3", "#d9793d", "#e68a4d")
 
-        for b in [self.btn_upload, self.btn_clear,self.btn_slice,self.btn_editor]:
+        for b in [self.btn_upload, self.btn_clear, self.btn_slice, self.btn_editor]:
             btn_layout.addWidget(b)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_bgs)
         btn_layout.addWidget(self.btn_sprite)
-        
+
         layout.addLayout(btn_layout)
 
     def make_btn(self, text, bg, hover, icon=None):
         btn = QPushButton(text)
         if icon:
             path = get_resource_path(f"assets/icons/{icon}.svg")
-            if os.path.exists(path): btn.setIcon(QIcon(path))
-        btn.setStyleSheet(f"QPushButton {{ background-color: {bg}; padding: 8px 15px; border: none; }}"
-                          f"QPushButton:hover {{ background-color: {hover}; }}")
+            if os.path.exists(path):
+                btn.setIcon(QIcon(path))
+        btn.setStyleSheet(
+            f"QPushButton {{ background-color: {bg}; padding: 8px 15px; border: none; }}"
+            f"QPushButton:hover {{ background-color: {hover}; }}"
+        )
         return btn
 
     def connect_signals(self):
         # 1. 基础功能
-        self.btn_upload.clicked.connect(lambda:self.left_stack.setCurrentIndex(0))
+        self.btn_upload.clicked.connect(lambda: self.left_stack.setCurrentIndex(0))
         self.btn_clear.clicked.connect(self.on_clear_content)
         self.btn_editor.clicked.connect(lambda: self.left_stack.setCurrentIndex(1))
         self.btn_slice.clicked.connect(self.on_slice_clicked)
 
-
         # 2. 导出功能 - 严格连接到原始代码中对应的函数名
-        self.btn_bgs.clicked.connect(self.handle_export_bgs_request)    
+        self.btn_bgs.clicked.connect(self.handle_export_bgs_request)
         self.btn_sprite.clicked.connect(self.handle_export_sprite_request)
-        
+
         # self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
         self.editor_page.bundle_updated.connect(self.on_editor_bundle_changed)
-        self.preview_panel.asset_tree.segment_changed.connect(self.preview_panel.update_segment_range)
+        self.preview_panel.asset_tree.segment_changed.connect(
+            self.preview_panel.update_segment_range
+        )
         # self.manual_editor.bundle_updated.connect(self.preview_panel.start_segment_preview)
 
     def on_editor_bundle_changed(self, bundle, segment=None):
@@ -167,111 +178,116 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
 
         # 更新资源树
         self.preview_panel.asset_tree.reset_with_bundle(bundle)
-        
+
         # 如果没有传入 segment，尝试从预览面板获取当前的，或者取第一个
         if not segment:
-            segment = self.preview_panel.current_segment or (bundle.segments[0] if bundle.segments else None)
-        
+            segment = self.preview_panel.current_segment or (
+                bundle.segments[0] if bundle.segments else None
+            )
+
         if segment:
             # 强制预览面板重载画面
             self.preview_panel.start_segment_preview(bundle, segment)
-            
-
 
     def handle_export_bgs_request(self):
         target = None
         # 如果在编辑器页面，只导编辑器里的那一个
         if self.left_stack.currentIndex() == 1:
-            if hasattr(self.editor_page, 'current_bundle') and self.editor_page.current_bundle:
+            if (
+                hasattr(self.editor_page, "current_bundle")
+                and self.editor_page.current_bundle
+            ):
                 target = self.editor_page.current_bundle.name
-        
+
         # 显式传递 target。如果是 Console 模式，target 就是 None
         self.on_export_bgs(target_name=target)
 
     def handle_export_sprite_request(self):
         target = None
         if self.left_stack.currentIndex() == 1:
-            if hasattr(self.editor_page, 'current_bundle') and self.editor_page.current_bundle:
+            if (
+                hasattr(self.editor_page, "current_bundle")
+                and self.editor_page.current_bundle
+            ):
                 target = self.editor_page.current_bundle.name
         self.on_export_sprite3(target_name=target)
 
     def on_clear_content(self):
         AssetManager().clear_all()
         self.console.clear()
-        
-        if hasattr(self.preview_panel, 'asset_tree'):
+
+        if hasattr(self.preview_panel, "asset_tree"):
             self.preview_panel.asset_tree.clear()
-            
-        if hasattr(self.editor_page, 'current_bundle'):
-            self.editor_page.current_bundle = None # 确保编辑器不再持有旧数据引用
-        
-        if hasattr(self.editor_page, 'scene'):
+
+        if hasattr(self.editor_page, "current_bundle"):
+            self.editor_page.current_bundle = None  # 确保编辑器不再持有旧数据引用
+
+        if hasattr(self.editor_page, "scene"):
             self.editor_page.scene.clear()
             self.editor_page.frame_list.clear()
-            
+
         self.add_log("♻️ 资源列表已清空", "#f38ba8")
-    
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-   
     def dropEvent(self, event):
         urls = event.mimeData().urls()
-        if not urls: return
+        if not urls:
+            return
 
         manager = AssetManager()
-        manager.clear_all() 
+        manager.clear_all()
         self.console.clear()
-        
+
         # 如果是编辑器模式，执行“重载”逻辑
         if self.left_stack.currentIndex() == 1:
-            
-            path = urls[0].toLocalFile() # 编辑器通常一次只吃一个
-            
+            path = urls[0].toLocalFile()  # 编辑器通常一次只吃一个
+
             # 1. 直接让管家加载（管家内部已适配单图/文件夹/bgs）
             bundle = manager.load_from_file(path) or manager.load_from_folder(path)
-            
+
             if bundle:
                 # 2. 编辑器模式下，我们通常希望它是唯一的
                 # 我们可以先清空仓库，确保编辑器里只操作这一个素材
-                manager._storage.clear() 
+                manager._storage.clear()
                 manager.register_asset(bundle)
-                
+
                 # 3. 通知编辑器（这里后面我们要改 ManualEditor 接收 bundle）
-                # self.editor_page.load_bundle(bundle) 
-                
+                # self.editor_page.load_bundle(bundle)
+
                 # 临时兼容旧逻辑
                 if not os.path.isdir(path):
                     self.editor_page.display_image(path)
-                
+
                 self.add_log(f"-> 编辑器已重载素材: {bundle.name}", "#a6e3a1")
-        
+
         # 如果是 Console 模式，执行“追加”逻辑
         else:
             for url in urls:
                 path = url.toLocalFile()
                 # 自动尝试从文件或文件夹加载
                 bundle = manager.load_from_file(path) or manager.load_from_folder(path)
-                
+
                 if bundle:
                     # 注册入库，自动查重名
                     final_name = manager.register_asset(bundle)
                     self.add_log(f"-> 已载入资源: {final_name}", "#89b4fa")
-            
+
             # Todo
             # 暂时注释掉报错行，稍后处理
             # self.preview_panel.asset_tree.refresh_from_manager()
-
 
     def add_log(self, msg, color="#cdd6f4", replace_last=False):
         """
         完全还原老代码：通过控制光标选中整行来实现原地替换
         """
         from PySide6.QtGui import QTextCursor
+
         # 构造 HTML 内容
         log_html = f'<div style="color:{color}; line-height: 110%; margin-bottom: 2px;">{msg}</div>'
-        
+
         if replace_last:
             cursor = self.console.textCursor()
             # 1. 移动到文档最末尾
@@ -284,6 +300,6 @@ class BingoPacker(QMainWindow, ExportLogic,SliceLogic):
         else:
             # 正常模式：追加新行
             self.console.append(log_html)
-            
+
         # 始终滚动到底部
         self.console.moveCursor(QTextCursor.End)
