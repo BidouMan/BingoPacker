@@ -601,7 +601,7 @@ class ManualEditor(QWidget, EditorUI):
             self.ants_timer.start(60)
 
         # 3. 设置样式 (保持之前的 2 像素加粗)
-        line_width = 2
+        line_width = 1
         w_pen = QPen(QColor(255, 255, 255), line_width)
         w_pen.setCosmetic(True)
         self.temp_mask_item.setPath(simplified_path)
@@ -1030,15 +1030,19 @@ class ManualEditor(QWidget, EditorUI):
         # --- 1. 处理鼠标事件 (解决选区不触发的核心) ---
         if source == self.view.viewport():
             mode = self.current_tool_mode
+            # 获取场景坐标 (在过滤器里我们需要手动转换)
+            if hasattr(event, "pos"):
+                scene_pos = self.view.mapToScene(event.pos())
+
+            if mode == ToolMode.MAGIC_WAND:
+                if event.type() == QEvent.MouseButtonPress:
+                    self.handle_magic_wand_click(scene_pos)
+                    return True  # 拦截事件，不让 View 处理
 
             # 只在选区模式下接管鼠标
             if mode == ToolMode.RECT_SELECT:
-                # 获取场景坐标 (在过滤器里我们需要手动转换)
-                if hasattr(event, "pos"):
-                    scene_pos = self.view.mapToScene(event.pos())
-
+                # 鼠标单击事件：交给 SelectionManager 处理，并且拦截掉让 View 自己处理
                 if event.type() == QEvent.MouseButtonPress:
-                    print(f"DEBUG Filter: Mouse Press at {scene_pos}")
                     self.selection_manager.handle_mouse_press(event, scene_pos)
                     return True  # 拦截，不给 View 内部平移逻辑机会
 
@@ -1133,7 +1137,7 @@ class ManualEditor(QWidget, EditorUI):
             self.selection_manager.abort_selection()  # 确保临时虚线框消失
 
         elif old_mode == ToolMode.MAGIC_WAND:
-            self.magic_wand.clear_ants()
+            self.deselect_all()
             # 如果有魔棒选区遮罩，看需求决定是否清理
 
         elif old_mode == ToolMode.CROP:

@@ -1,7 +1,8 @@
 # magic_wand.py 完整精准版
 
-from PySide6.QtGui import QImage, QColor, QRegion, QBitmap
-from PySide6.QtCore import QPoint, Qt,QRect
+from PySide6.QtGui import QImage, QRegion, QBitmap
+from PySide6.QtCore import QPoint, QRect
+
 
 class MagicWandTool:
     def __init__(self, tolerance=20):
@@ -11,17 +12,18 @@ class MagicWandTool:
         # 1. 如果其中一个是完全透明，另一个不是，直接判定为不相似
         if (c1.alpha() < 5) != (c2.alpha() < 5):
             return False
-            
+
         # 2. 使用欧几里得距离计算 RGB 差异 (更精准的数学模型)
         # 这样 (255, 89, 0) 和 (255, 0, 0) 之间的距离是 89，会比平均值更敏感
         import math
+
         distance = math.sqrt(
-            (c1.red() - c2.red())**2 +
-            (c1.green() - c2.green())**2 +
-            (c1.blue() - c2.blue())**2 +
-            (c1.alpha() - c2.alpha())**2
+            (c1.red() - c2.red()) ** 2
+            + (c1.green() - c2.green()) ** 2
+            + (c1.blue() - c2.blue()) ** 2
+            + (c1.alpha() - c2.alpha()) ** 2
         )
-        
+
         # 此时的 tolerance 建议设置在 10-30 之间
         return distance <= self.tolerance
 
@@ -37,10 +39,10 @@ class MagicWandTool:
         img = image.convertToFormat(QImage.Format_ARGB32)
         width, height = img.width(), img.height()
         target_color = img.pixelColor(start_point)
-        
+
         # 创建单色掩码，初始全黑(0)
         mask = QImage(img.size(), QImage.Format_Mono)
-        mask.fill(0) 
+        mask.fill(0)
 
         if not contiguous:
             # --- 全图模式：扫描每一个像素 ---
@@ -67,7 +69,7 @@ class MagicWandTool:
         # 转换为 QRegion 并处理反向纠偏
         selection_bitmap = QBitmap.fromImage(mask)
         region = QRegion(selection_bitmap)
-        
+
         # 纠偏：确保点击的点必须在选区内，如果不在，说明 0/1 填反了
         if not region.contains(start_point):
             region = QRegion(QRect(0, 0, width, height)).subtracted(region)
