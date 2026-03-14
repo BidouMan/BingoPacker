@@ -23,7 +23,6 @@ class MagicWandTool:
         ptr = temp_img.bits()
         arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
         target_pixel = arr[iy, ix].astype(np.int32)
-        print(f"DEBUG [MagicWand]: 起点像素 {target_pixel}, 容差 {self.tolerance}")
 
         # 2. 计算掩码 (RGB)
         diff = np.abs(arr[:, :, :3].astype(np.int32) - target_pixel[:3])
@@ -37,7 +36,6 @@ class MagicWandTool:
             if start_label > 0:
                 mask = labels == start_label
             else:
-                print("DEBUG [MagicWand]: 起点不满足容差，连通域为空")
                 return QRegion()
 
         # 4. --- 根源级修复：像素行扫描构建 QRegion ---
@@ -58,9 +56,6 @@ class MagicWandTool:
                 q_region += QRegion(QRect(s, y, e - s, 1))
                 rect_count += 1
 
-        print(
-            f"DEBUG [MagicWand]: 扫描完成。像素总数: {np.sum(mask)}, 构建矩形数: {rect_count}, 最终边界: {q_region.boundingRect()}"
-        )
         return q_region
 
 
@@ -88,14 +83,8 @@ class SelectionAntsItem(QGraphicsItem):
 
         # 3. 容错处理：如果简化失败（极其复杂的情况），至少保证能看到东西
         if self._path.isEmpty() and not self.region.isEmpty():
-            print("DEBUG [AntsItem]: simplified 结果为空，回退到原始矩形绘制")
             for rect in self.region:
                 self._path.addRect(QRectF(rect))
-
-        print(
-            f"DEBUG [AntsItem]: 路径合并完成。矩形数: {self.region.rectCount()}, 路径元素数: {self._path.elementCount()}"
-        )
-        print(f"DEBUG [AntsItem]: 最终路径边界: {self._path.boundingRect()}")
 
     def boundingRect(self):
         # 边界需要稍微扩大，以容纳 1 像素宽的虚线

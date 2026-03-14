@@ -247,9 +247,6 @@ class ManualEditor(QWidget, EditorUI):
 
         if target:
             target.on_editor_bundle_changed(self.current_bundle)
-            print(
-                f"DEBUG [Editor]: 已同步素材 '{self.current_bundle.name}' (1帧, {pixmap.width()}x{pixmap.height()})"
-            )
 
     def on_do_slice(self):
         """
@@ -333,7 +330,6 @@ class ManualEditor(QWidget, EditorUI):
             self.preview_panel.start_segment_preview(
                 self.current_bundle, self.current_bundle.segments[0]
             )
-        print(f"DEBUG [Slice]: 裁切完成，已识别 {len(new_frames_data)} 帧")
 
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""
@@ -347,7 +343,6 @@ class ManualEditor(QWidget, EditorUI):
     def update_frame_list_ui(self):
         """强制从 Bundle 数据源刷新左侧列表，确保不为空"""
         if not self.current_bundle or not self.current_bundle.frames:
-            print("DEBUG [UI]: Bundle 为空，清空列表")
             self.frame_list.clear()
             return
 
@@ -370,8 +365,6 @@ class ManualEditor(QWidget, EditorUI):
             item.setIcon(QIcon(icon_pix))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.frame_list.addItem(item)
-
-        print(f"DEBUG [UI]: 列表已刷新，共 {len(self.current_bundle.frames)} 帧")
 
     def switch_frame_preview(self, index):
         """切换显示指定索引的帧数据"""
@@ -450,8 +443,6 @@ class ManualEditor(QWidget, EditorUI):
         # 发射 bundle_updated 信号，但传递 None，表示“当前已无活动资源”
         self.bundle_updated.emit(None)
 
-        print("DEBUG [Editor]: 场景已完全重置，已发送全局清理信号")
-
     def import_project_file(self, file_path):
         """导入并还原工程文件数据到编辑器 UI"""
         # 1. 彻底清理旧状态，防止僵尸对象干扰
@@ -464,7 +455,6 @@ class ManualEditor(QWidget, EditorUI):
         # 2. 解析模型
         new_bundle = self.asset_manager.load_from_file(file_path)
         if not new_bundle:
-            print(f"DEBUG [Editor]: 导入失败，无法解析文件 {file_path}")
             return
 
         # 3. 同步基础数据
@@ -518,7 +508,6 @@ class ManualEditor(QWidget, EditorUI):
 
         # 8. 同步外部面板（AssetTree 等）
         self.bundle_updated.emit(self.current_bundle, {})
-        print(f"DEBUG [Editor]: 成功导入工程，总帧数: {len(self.current_frames)}")
 
     def get_canvas_coordinates(self, pos):
         """将视图坐标转换为场景(图片)坐标"""
@@ -537,7 +526,6 @@ class ManualEditor(QWidget, EditorUI):
 
         # 获取本地坐标
         local_pos = target_item.mapFromScene(scene_pos).toPoint()
-        print(f"DEBUG [Editor]: 场景坐标{scene_pos} -> 本地像素坐标{local_pos}")
 
         img = target_item.pixmap().toImage()
         self.magic_wand.tolerance = self.slider_tolerance.value()
@@ -559,7 +547,6 @@ class ManualEditor(QWidget, EditorUI):
             self.temp_mask_item.setTransform(
                 target_item.transform()
             )  # 确保变换矩阵一致
-            print(f"DEBUG [Editor]: 选区矩形数量: {region.rectCount()}")
 
     def update_selection_display(self, region):
         """
@@ -567,13 +554,11 @@ class ManualEditor(QWidget, EditorUI):
         """
         # 1. 彻底清理旧选区，防止残留
         if hasattr(self, "temp_mask_item") and self.temp_mask_item:
-            print("DEBUG [Editor]: 移除旧选区图元")
             if self.temp_mask_item.scene():
                 self.scene.removeItem(self.temp_mask_item)
             self.temp_mask_item = None
 
         if region is None or region.isEmpty():
-            print("DEBUG [Editor]: 传入选区为空，停止动画")
             if hasattr(self, "ants_timer") and self.ants_timer:
                 self.ants_timer.stop()
                 self.ants_timer = None
@@ -595,12 +580,7 @@ class ManualEditor(QWidget, EditorUI):
         if target is None:
             target = preview_item
 
-        if target is None:
-            print("DEBUG [Editor]: 关键错误 - 找不到任何可用的底图 target")
-            return
-
         # 3. 创建全新蚂蚁线图元
-        print(f"DEBUG [Editor]: 创建新选区图元，精准边界: {region.boundingRect()}")
         self.temp_mask_item = SelectionAntsItem(region)
         self.scene.addItem(self.temp_mask_item)
 
@@ -614,7 +594,6 @@ class ManualEditor(QWidget, EditorUI):
             self.ants_timer = QTimer(self)
             self.ants_timer.timeout.connect(self._animate_ants)
             self.ants_timer.start(150)
-            print("DEBUG [Editor]: 启动动画计时器")
 
         self.temp_mask_item.update()  # 确保在最上层
 
@@ -624,22 +603,6 @@ class ManualEditor(QWidget, EditorUI):
             if self.temp_mask_item.offset > 8:  # 虚线周期长度
                 self.temp_mask_item.offset = 0
             self.temp_mask_item.update()
-
-    # def on_magic_wand_toggled(self, checked):
-    #     """当魔棒按钮状态切换时触发"""
-    #     if hasattr(self, "magic_wand_panel"):
-    #         self.magic_wand_panel.setVisible(checked)
-
-    #     # 只需要让视图重绘光标即可，不需要手动 setDragMode 了
-    #     # 因为我们已经在视图内部通过状态机决定了鼠标样式
-    #     if checked:
-    #         # 互斥逻辑：开启魔棒时，关闭矩形选取模式
-    #         self.btn_pick.setChecked(False)
-    #         self.selection_manager.set_active(False)
-
-    #     # 核心：通知视图根据最新状态更新光标
-    #     self.view.update_cursor_style()
-    #     print(f"DEBUG [Editor]: 魔棒模式切换为: {checked}")
 
     def deselect_all(self):
         """取消选择：同时清理魔棒选区和手动矩形选区"""
@@ -651,12 +614,10 @@ class ManualEditor(QWidget, EditorUI):
             self.update_selection_display(
                 QRegion()
             )  # 传入空选区会触发我们写好的清理逻辑
-            print("DEBUG [Editor]: 已通过快捷键清空魔棒选区")
 
         # 2. 清理手动绘制的矩形选区 (SelectionManager)
         if hasattr(self, "selection_manager"):
             self.selection_manager.clear_selections()
-            print("DEBUG [Editor]: 已通过快捷键清空矩形选区")
 
     def delete_selected_pixels(self):
         """核心功能：将选区内的像素变为透明"""
@@ -689,7 +650,6 @@ class ManualEditor(QWidget, EditorUI):
                 final_region += QRegion(local_rect_f.toRect())
 
         if final_region.isEmpty():
-            print("DEBUG [Editor]: 选区为空，跳过删除")
             return
 
         # 3. 执行像素擦除
@@ -722,18 +682,21 @@ class ManualEditor(QWidget, EditorUI):
 
         # 6. 清理选区和蚂蚁线
         self.deselect_all()
-        print("DEBUG [Editor]: 像素删除成功，已刷新显示")
 
     def on_expand_selection(self):
         if self.selection_mask:
             r = self.selection_mask
-            # 向四周位移 1 像素并合并，实现外扩
+            # 8 方向扩张：上下左右 + 四个对角线
             self.selection_mask = (
                 r
-                | r.translated(1, 0)
-                | r.translated(-1, 0)
-                | r.translated(0, 1)
-                | r.translated(0, -1)
+                | r.translated(1, 0)  # 右
+                | r.translated(-1, 0)  # 左
+                | r.translated(0, 1)  # 下
+                | r.translated(0, -1)  # 上
+                | r.translated(1, 1)  # 右下
+                | r.translated(-1, -1)  # 左上
+                | r.translated(1, -1)  # 右上
+                | r.translated(-1, 1)  # 左下
             )
             self.update_selection_display(self.selection_mask)
 
@@ -781,12 +744,9 @@ class ManualEditor(QWidget, EditorUI):
         if len(self.undo_stack) > self.max_undo_steps:
             self.undo_stack.pop(0)
 
-        print(f"DEBUG: 已保存撤销点，当前步数: {len(self.undo_stack)}")
-
     def undo(self):
         """回退到上一个状态"""
         if not self.undo_stack:
-            print("DEBUG: 没有可撤销的操作")
             return
 
         # 弹出最后一张图
@@ -802,75 +762,6 @@ class ManualEditor(QWidget, EditorUI):
         if hasattr(self.view, "checker_item") and self.view.checker_item:
             self.view.checker_item.set_rect(new_rect)
 
-        print(f"DEBUG: 已撤销，剩余步数: {len(self.undo_stack)}")
-
-    # selection_manager.py 中添加
-
-    # selection_manager.py 中添加
-
-    # def handle_key_nudge(self, key, is_boost=False):
-    #     if not self.active: return
-
-    #     # 1. 寻找目标：优先用鼠标正在拽的，没有就抓场景里最新的
-    #     target = self.moving_item
-    #     if not target:
-    #         selections = self._get_valid_selections()
-    #         if selections:
-    #             target = selections[0] # 抓取最顶层的选区
-
-    #     if not target:
-    #         print("DEBUG: 场景中未发现选区框，请确保已点击 btn_pick 并画了一个框")
-    #         return
-
-    #     # 2. 执行抠图初始化 (只需执行一次)
-    #     # 检查是否已经有了悬浮像素层
-    #     if not hasattr(target, 'pix_overlay') or target.pix_overlay is None:
-    #         # 找到主图层 (排除掉那些 clone 出来的)
-    #         bg_item = next((i for i in self.scene.items()
-    #                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-
-    #         if bg_item:
-    #             print(f"DEBUG: 选区 {target} 首次移动，开始执行抠图...")
-    #             # 获取选区在场景中的位置
-    #             scene_rect = target.sceneBoundingRect()
-    #             # 转换到主图的本地坐标
-    #             local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
-    #             local_rect = QRect(local_top_left, scene_rect.size().toSize())
-
-    #             # 保存原始区域信息，用于后续合并
-    #             target.setData(10, local_rect)
-
-    #             # 抠图并擦除原图对应区域
-    #             crop_pix = bg_item.pixmap().copy(local_rect)
-    #             self._permanently_erase_pixels(bg_item, local_rect)
-
-    #             # 创建随框移动的像素层
-    #             overlay = QGraphicsPixmapItem(crop_pix)
-    #             overlay.is_clone = True
-    #             overlay.setParentItem(target) # 关键：让像素层成为框的子元素
-    #             overlay.setZValue(-1)
-    #             overlay.setPos(target.boundingRect().topLeft())
-    #             target.pix_overlay = overlay
-    #             target.setBrush(self.add_color)
-
-    #     # 3. 计算并位移
-    #     step = 10 if is_boost else 1
-    #     dx, dy = 0, 0
-    #     if key == Qt.Key_Left: dx = -step
-    #     elif key == Qt.Key_Right: dx = step
-    #     elif key == Qt.Key_Up: dy = -step
-    #     elif key == Qt.Key_Down: dy = step
-
-    #     # 移动选区框，子项 pix_overlay 会自动同步移动
-    #     target.moveBy(dx, dy)
-
-    #     # 更新记录的位移差 (data(1))，确保 clear_selections 合并时位置正确
-    #     curr_offset = target.data(1) or QPointF(0, 0)
-    #     target.setData(1, curr_offset + QPointF(dx, dy))
-
-    #     self.scene.update()
-    #     print(f"DEBUG: 选区已移动 {dx}, {dy}")
-
     def keyPressEvent(self, event):
         modifiers = event.modifiers()
         is_ctrl = bool(
@@ -882,15 +773,12 @@ class ManualEditor(QWidget, EditorUI):
 
         # --- 修改点：统一使用 selection_manager 的逻辑 ---
         if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-            print(222)
             # 如果是选择模式，调用选区微调
             if self.btn_pick.isChecked():
-                print(111)
                 self.selection_manager.handle_key_nudge(key, is_shift)
             else:
                 # 否则可以保留原有的 handle_pixel_nudge 或者不执行
-                self.handle_pixel_nudge(key, is_shift)
-                print(333)
+                self.selection_manager.handle_pixel_nudge(key, is_shift)
             event.accept()
             return
 
@@ -903,12 +791,10 @@ class ManualEditor(QWidget, EditorUI):
         # --- 核心：裁切工具的键盘监听 ---
         if self.current_tool_mode == ToolMode.CROP:
             if key in (Qt.Key_Return, Qt.Key_Enter):
-                print("DEBUG [Editor]: 键盘回车触发裁切")
                 self.apply_crop()
                 event.accept()
                 return
             elif key == Qt.Key_Escape:
-                print("DEBUG [Editor]: ESC 取消裁切")
                 self.set_tool_mode(ToolMode.IDLE)
                 event.accept()
                 return
@@ -979,7 +865,6 @@ class ManualEditor(QWidget, EditorUI):
                         # 将场景坐标转为裁切框本地坐标判断是否点在框内
                         local_pos = self.crop_box.mapFromScene(scene_pos)
                         if self.crop_box.rect().contains(local_pos):
-                            print("DEBUG [Filter]: 双击确认裁切")
                             self.apply_crop()
                             return True
                 # 其他鼠标事件返回 False，让 Scene 正常传递给 CropBoxItem 的手柄
@@ -992,13 +877,12 @@ class ManualEditor(QWidget, EditorUI):
             key = event.key()
 
             if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-                print(f"DEBUG Filter: Key Nudge {key}")
                 is_shift = bool(modifiers & Qt.ShiftModifier)
 
                 if self.current_tool_mode == ToolMode.RECT_SELECT:
                     self.selection_manager.handle_key_nudge(key, is_shift)
                 else:
-                    self.handle_pixel_nudge(key, is_shift)
+                    self.selection_manager.handle_pixel_nudge(key, is_shift)
                 return True
 
         return super().eventFilter(source, event)
@@ -1032,7 +916,6 @@ class ManualEditor(QWidget, EditorUI):
             curr_seg = {"start": 1, "end": len(self.current_bundle.frames)}
 
         self.bundle_updated.emit(self.current_bundle, curr_seg)
-        print(f"DEBUG: [Sync Success] {self.current_bundle.name} 数据已入库")
 
     # -----------------------------------------------------------------
     # 在 editor_main.py 的 ManualEditor 类中添加
@@ -1094,21 +977,18 @@ class ManualEditor(QWidget, EditorUI):
 
         # 7. 退出工具模式
         self.set_tool_mode(ToolMode.IDLE)
-        print(f"DEBUG [Apply]: 裁切完成，同步帧索引: {idx}")
 
     def set_tool_mode(self, mode):
         """
         切换工具模式的唯一入口，负责清理旧状态和初始化新状态
         """
-        # 如果重复点击当前已经激活的工具，可以选择跳过或触发取消行为
-        # if self.current_tool_mode == mode: return
 
         # --- 第一阶段：清理旧工具 (Deactivate) ---
         self._cleanup_current_tool()
 
         # --- 第二阶段：更新模式 ---
         self.current_tool_mode = mode
-        print(f"Tool changed to: {mode}")
+        # print(f"Tool changed to: {mode}")
 
         is_wand = mode == ToolMode.MAGIC_WAND
         self.magic_wand_panel.setVisible(is_wand)
@@ -1143,7 +1023,6 @@ class ManualEditor(QWidget, EditorUI):
         elif mode == ToolMode.CROP:
             target = self.get_active_preview_item()
             if not target or not target.pixmap() or target.pixmap().isNull():
-                print("DEBUG [Editor]: 无效底图，无法开启裁切")
                 self.set_tool_mode(ToolMode.IDLE)
                 return
 
@@ -1153,4 +1032,3 @@ class ManualEditor(QWidget, EditorUI):
 
             # 2. 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)
-            print(f"DEBUG [Editor]: 裁切模式已激活，绑定到底图 {target}")

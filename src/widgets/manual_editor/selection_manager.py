@@ -167,15 +167,8 @@ class SelectionManager:
         ]
 
         if clicked_selections:
-            # 情况 A：点中了某个选区
-            print(
-                f"DEBUG: Hit existing selection ({type(clicked_selections[0])})! Removing..."
-            )
             self._remove_item(clicked_selections[0])
         else:
-            # 情况 B：该点下没有任何属于 selections 的物体
-            # 无论下面是背景图还是棋盘格，只要不是选区框，就执行全清
-            print("DEBUG: Hit empty space! Clearing ALL selections...")
             self.clear_selections()
 
             # 关键：手动清理双击产生的那个微小残留
