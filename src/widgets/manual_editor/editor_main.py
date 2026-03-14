@@ -374,27 +374,46 @@ class ManualEditor(QWidget, EditorUI):
         print(f"DEBUG [UI]: 列表已刷新，共 {len(self.current_bundle.frames)} 帧")
 
     def switch_frame_preview(self, index):
+        """切换显示指定索引的帧数据"""
         if index < 0 or index >= len(self.current_frames):
             return
 
-        # 1. 正常清理选区状态 (保持你原有的逻辑)
-        if hasattr(self, "selection_manager") and self.last_index != -1:
-            old_frame_data = self.current_frames[self.last_index]
-            self.selection_manager.clear_selections(target_frame_data=old_frame_data)
+        data_item = self.current_frames[index]
+        # 确保拿到 Pixmap
+        pix = (
+            data_item.pixmap
+            if hasattr(data_item, "pixmap")
+            else data_item.get("pixmap")
+        )
 
-        self.last_index = index
+        if pix is None or pix.isNull():
+            return
 
-        # 2. 不要重建对象！只需换图
-        pix = self.current_frames[index]["pixmap"]
-        self.preview_item.setPixmap(pix)
+        # 确保预览 Item 存在
+        if self.preview_item is None:
+            self.preview_item = QGraphicsPixmapItem(pix)
+            self.preview_item.setTransformationMode(
+                Qt.TransformationMode.FastTransformation
+            )
+            self.scene.addItem(self.preview_item)
+            self.preview_item.setZValue(0)
+        else:
+            self.preview_item.setPixmap(pix)
 
-        # 3. 适配场景大小
-        new_rect = QRectF(0, 0, pix.width(), pix.height())
-        self.scene.setSceneRect(new_rect)
-        if hasattr(self.view, "checker_item"):
-            self.view.checker_item.set_rect(new_rect)
+        # --- 核心修复：重置场景和视图范围 ---
+        rect = QRectF(pix.rect())
+        self.scene.setSceneRect(rect)  # 强制场景大小等于当前帧
 
-        self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+        # 如果有棋盘格，同步它的大小
+        if hasattr(self.view, "checker_item") and self.view.checker_item:
+            self.view.checker_item.rect = rect
+            self.view.checker_item.update()
+
+        # 确保图像始终在 (0,0) 位置显示
+        self.preview_item.setPos(0, 0)
+
+        # 刷新视图，防止旧残影
+        self.view.update()
 
     def on_save_clicked(self):
         """保存逻辑：集成 SliceLogic"""
@@ -435,46 +454,71 @@ class ManualEditor(QWidget, EditorUI):
 
     def import_project_file(self, file_path):
         """导入并还原工程文件数据到编辑器 UI"""
+        # 1. 彻底清理旧状态，防止僵尸对象干扰
         self.update_selection_display(QRegion())
+        if hasattr(self, "selection_manager"):
+            self.selection_manager.force_reset_internal()
+
         self.asset_manager.clear_all()
 
-        # 1. 使用 AssetManager 解析模型
+        # 2. 解析模型
         new_bundle = self.asset_manager.load_from_file(file_path)
         if not new_bundle:
+            print(f"DEBUG [Editor]: 导入失败，无法解析文件 {file_path}")
             return
 
-        # 2. 更新当前编辑对象并记录路径
+        # 3. 同步基础数据
         self.current_bundle = new_bundle
         self.current_source_path = file_path
 
-        # 3. 还原 current_frames 数据供编辑器内部渲染
-        self.current_frames = [
-            {"pixmap": f.pixmap, "rect": f.rect} for f in new_bundle.frames
-        ]
+        # 4. 【关键修复】还原 current_frames：必须确保它是 FrameData 对象列表
+        # 这样 switch_frame_preview 才能通过 .pixmap 访问
+        self.current_frames = []
+        for f in new_bundle.frames:
+            # 这里的 f 已经是 AssetManager 加载好的 FrameData 实例了
+            # 我们直接引用它即可，确保对象属性完整
+            self.current_frames.append(f)
 
-        # 4. UI 深度重置
+        # 5. UI 深度重置：先清空场景和列表
         self.frame_list.blockSignals(True)
         self.scene.clear()
         self.preview_item = None
+        self.frame_list.clear()  # 显式清空左侧列表
 
-        # 5. 重建左侧缩略图 UI
+        # 6. 【核心修复】重建左侧缩略图 UI
+        # 必须在 clear 之后立即填充新数据
         self.update_frame_list_ui()
 
-        # 6. 还原画布状态
+        # 7. 还原画布渲染
         if self.current_frames:
-            first_pix = self.current_frames[0]["pixmap"]
-            new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
-            self.scene.setSceneRect(new_rect)
-            # 这里的 checker_item 处理逻辑参考 scalable_view.py
-            self.view.checker_item = CheckerboardItem(new_rect)
-            self.scene.addItem(self.view.checker_item)
+            # 取第一帧数据用于初始化画布尺寸
+            first_frame = self.current_frames[0]
+            first_pix = first_frame.pixmap
 
-            self.frame_list.blockSignals(False)
-            self.frame_list.setCurrentRow(0)
-            self.switch_frame_preview(0)
+            if not first_pix.isNull():
+                new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+                self.scene.setSceneRect(new_rect)
 
-        # 7. 触发全局同步信号，通知 AssetTree 刷新片段
-        self.bundle_updated.emit(self.current_bundle)
+                # 初始化棋盘格背景
+                self.view.checker_item = CheckerboardItem(new_rect)
+                self.scene.addItem(self.view.checker_item)
+                self.view.checker_item.setZValue(-10)  # 确保在最底层
+
+                # 恢复信号处理
+                self.frame_list.blockSignals(False)
+
+                # 选中第一行，这会触发渲染
+                if self.frame_list.count() > 0:
+                    self.frame_list.setCurrentRow(0)
+                    # 显式调用一次渲染，确保画布出现图像
+                    self.switch_frame_preview(0)
+
+                # 自动缩放以适应视口
+                self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+        # 8. 同步外部面板（AssetTree 等）
+        self.bundle_updated.emit(self.current_bundle, {})
+        print(f"DEBUG [Editor]: 成功导入工程，总帧数: {len(self.current_frames)}")
 
     def get_canvas_coordinates(self, pos):
         """将视图坐标转换为场景(图片)坐标"""
