@@ -144,10 +144,21 @@ class ScalableView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event):
-        """缩放逻辑：通常作为全局功能，不随工具改变"""
-        # 保持你原有的缩放逻辑即可
-        # 记得在缩放结束后，可能需要触发 checker_item 的重绘缓存更新
-        super().wheelEvent(event)
+        """缩放逻辑必须在 View 层级"""
+        # 1. 确保锚点设置正确 (这是 QGraphicsView 的方法)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+        zoom_in_factor = 1.25
+        zoom_out_factor = 1 / zoom_in_factor
+
+        # 2. 执行缩放
+        if event.angleDelta().y() > 0:
+            self.scale(zoom_in_factor, zoom_in_factor)
+        else:
+            self.scale(zoom_out_factor, zoom_out_factor)
+
+        # 3. 关键：接受事件，阻止它继续向上传递或向下分发给 Item
+        event.accept()
 
     def mouseDoubleClickEvent(self, event):
         if hasattr(self, "selection_manager") and self.selection_manager.active:
@@ -223,3 +234,5 @@ class CheckerboardItem(QGraphicsItem):
             self.scene().addItem(self.checker_item)
         else:
             self.checker_item.set_rect(rect)
+
+    # scalable_view.py
