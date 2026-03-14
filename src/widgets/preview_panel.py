@@ -157,25 +157,30 @@ class PreviewPanel(QFrame):
     # preview_panel.py
 
     def start_segment_preview(self, bundle, segment):
-        # 记录是否是同一个片段
-        is_same_seg = self.current_bundle == bundle and self.current_segment == segment
+        # 1. 无论如何，先停止旧的计时器，防止频率叠加
+        if self.play_timer.isActive():
+            self.play_timer.stop()
 
+        is_same_seg = self.current_bundle == bundle and self.current_segment == segment
         self.current_bundle = bundle
         self.current_segment = segment
 
-        # 如果不是同一个片段，才重置进度条到第一帧
         if not is_same_seg:
             self.current_frame_relative_idx = 0
 
-        # --- 关键：无论是不是同一个，都要执行重新渲染 ---
-        # 这样内存中修改后的 Pixmap 才会替换掉 Label 里的旧图
+        # 2. 重新计算并设置间隔
+        fps = self.speed_slider.value()
+        interval = int(1000 / max(1, fps))
+        self.play_timer.setInterval(interval)  # 显式设置，不依赖 update_play_speed
+
         self.render_current_frame()
 
-        # 确保定时器正常运行
-        self.update_play_speed()  # 刷新频率
-        if not self.play_timer.isActive() and len(bundle.frames) > 1:
+        # 3. 只有帧数大于 1 且用户没有手动暂停时才开启
+        if len(bundle.frames) > 1:
             self.play_timer.start()
             self.update_play_button_icon(True)
+        else:
+            self.update_play_button_icon(False)
 
     def render_current_frame(self):
         if not self.current_bundle or not self.current_bundle.frames:

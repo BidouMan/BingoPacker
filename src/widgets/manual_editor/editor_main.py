@@ -245,10 +245,9 @@ class ManualEditor(QWidget, EditorUI):
 
     def on_do_slice(self):
         """
-        最终版：执行裁切并同步到预览
-        解决：物理删除底图、重置按钮状态、重置选区状态
+        智能裁切逻辑：确保数据物理同步到 Bundle，并刷新 UI
         """
-        # 1. 寻找画布上的底图（排除选区克隆体）
+        # 1. 寻找画布上的底图
         bg_item = next(
             (
                 i
@@ -260,61 +259,73 @@ class ManualEditor(QWidget, EditorUI):
         if not bg_item:
             return
 
-        # 2. 执行裁切逻辑（获取矩形并生成新帧）
+        # 2. 获取裁切后的结果
         rects = self.selection_manager.get_sorted_selections()
         source_pixmap = bg_item.pixmap()
 
         if rects:
-            self.current_frames = self.slice_logic.run_manual_slice(bg_item, rects)
+            # 手动框选裁切
+            new_frames_data = self.slice_logic.run_manual_slice(bg_item, rects)
         else:
-            self.current_frames = self.slice_logic.run_auto_slice_to_preview(
-                source_pixmap
-            )
+            # 自动识别裁切
+            new_frames_data = self.slice_logic.run_auto_slice_to_preview(source_pixmap)
 
-        if self.current_frames:
-            # --- 核心清理 A：彻底物理移除原始底图和选区管理器残留 ---
-            if bg_item.scene():
-                self.scene.removeItem(bg_item)
+        if not new_frames_data:
+            return
 
-            # 这里调用的是强制重置，不涉及合并逻辑，因为底图都换了
-            self.selection_manager.selections.clear()
-            self.selection_manager.active = False
-            self.selection_manager.moving_item = None
+        self.save_undo_state()
 
-            # 3. 更新数据模型 (AssetBundle)
-            if self.current_bundle:
-                new_max = len(self.current_frames)
-                self.current_bundle.frames = [
-                    FrameData(f["pixmap"], f["rect"], f"{self.current_bundle.name}_{i}")
-                    for i, f in enumerate(self.current_frames)
-                ]
-                # 更新片段范围
-                for s in self.current_bundle.segments:
-                    if s.get("name") == "Default":
-                        s["start"] = 1
-                        s["end"] = new_max
+        # 3. 【核心同步】将结果写回 Bundle（这是 update_frame_list_ui 的数据源）
+        if self.current_bundle:
+            # 物理清空并重新填充 Bundle 的 frames
+            self.current_bundle.frames = []
+            for i, f in enumerate(new_frames_data):
+                # 将字典数据包装回 FrameData 对象
+                frame_obj = FrameData(
+                    pixmap=f["pixmap"],
+                    rect=f.get("rect", QRectF()),
+                    name=f"{self.current_bundle.name}_{i}",
+                )
+                self.current_bundle.frames.append(frame_obj)
 
-            # 4. 重置 UI 状态
-            self.update_frame_list_ui()
+            # 同步更新 current_frames 变量，保持内存中引用一致
+            self.current_frames = new_frames_data
 
-            # 彻底销毁预览 Item 缓存
-            if self.preview_item and self.preview_item.scene():
-                self.scene.removeItem(self.preview_item)
-            self.preview_item = None
+            # 更新片段范围（Default 段落涵盖所有新帧）
+            new_count = len(self.current_bundle.frames)
+            for s in self.current_bundle.segments:
+                if s.get("name") == "Default":
+                    s["start"] = 1
+                    s["end"] = new_count
 
-            # 5. --- 核心修复：重置裁切按钮状态，使其可以再次点击 ---
-            self.btn_slice.setChecked(False)
-            # 如果有状态栏更新，在这里调用一次
-            if hasattr(self, "update_tool_status"):
-                self.update_tool_status()
+        # 4. 清理选区残留
+        self.selection_manager.clear_selections()  # 建议调用 manager 自带的清理
+        self.selection_manager.active = False
 
-            # 6. 激活第一帧显示
-            self.last_index = -1  # 强制重置索引记录
+        # 5. 【关键】不要完全删除 preview_item 导致丢失，而是重置它
+        # 我们保留一个干净的画布，由 switch_frame_preview 去填充内容
+        self.frame_list.clear()  # 先清空旧列表 UI
+        self.update_frame_list_ui()  # 重新从 Bundle 读取并填充
+
+        # 6. 重置按钮和索引
+        self.btn_slice.setChecked(False)
+        self.last_index = -1
+
+        # 7. 切换到第一帧（这会自动设置 preview_item 的 Pixmap 和位置）
+        if self.current_bundle.frames:
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
 
-            # 全局同步一次数据
-            self.sync_and_notify()
+        self.sync_and_notify()
+
+        if hasattr(self, "preview_panel"):
+            # 强制先停一下，防止裁切瞬间逻辑抖动导致的计时器加速
+            self.preview_panel.play_timer.stop()
+            # 重新启动预览
+            self.preview_panel.start_segment_preview(
+                self.current_bundle, self.current_bundle.segments[0]
+            )
+        print(f"DEBUG [Slice]: 裁切完成，已识别 {len(new_frames_data)} 帧")
 
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""
