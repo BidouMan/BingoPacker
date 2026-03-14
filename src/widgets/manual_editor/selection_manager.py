@@ -123,17 +123,27 @@ class SelectionManager:
         return item.path()
 
     def _update_item_shape(self, item, path):
-        if isinstance(item, QGraphicsRectItem):
-            new_item = QGraphicsPathItem(path)
-            new_item.setPen(self.add_pen)
-            new_item.setBrush(self.add_color)
-            new_item.setZValue(10)
+        """核心：确保形状更新的同时，保留所有绑定的逻辑数据"""
+        new_item = QGraphicsPathItem(path)
+        new_item.setPen(self.add_pen)
+        new_item.setBrush(self.add_color)
+        new_item.setZValue(10)
+
+        # 复制关键数据：坐标偏移、原始位置等
+        new_item.setData(1, item.data(1))  # 位移量
+        new_item.setData(10, item.data(10))  # 原始坑位
+
+        if hasattr(item, "pix_overlay"):
+            new_item.pix_overlay = item.pix_overlay
+            new_item.pix_overlay.setParentItem(new_item)
+
+        # 物理替换
+        if item in self.selections:
             idx = self.selections.index(item)
             self.selections[idx] = new_item
-            self.scene.removeItem(item)
-            self.scene.addItem(new_item)
-        else:
-            item.setPath(path)
+
+        self.scene.removeItem(item)
+        self.scene.addItem(new_item)
 
     def _create_new_rect(self, rect):
         item = QGraphicsRectItem(rect)
@@ -146,10 +156,6 @@ class SelectionManager:
     def handle_double_click(self, scene_pos):
         if not self.active:
             return
-
-        print(f"DEBUG: Entering Double Click Logic at {scene_pos}")
-
-        # 1. 明确我们要寻找的目标类型
 
         # 2. 获取该点下所有的物体
         items_at_point = self.scene.items(scene_pos)
@@ -544,30 +550,42 @@ class SelectionManager:
         self.active = True
         self.start_point = scene_pos
 
-        # 优先级 1：检查是否点到了已有的选区（用于移动或减选）
+        modifiers = event.modifiers()
+        is_shift = bool(modifiers & Qt.ShiftModifier)
+        is_alt_option = bool(modifiers & Qt.AltModifier)
+
+        # 1. 检查是否点击了已有的选区 (仅在无修饰键时进入移动模式)
         valid_items = self._get_valid_selections()
         items_at_point = self.scene.items(scene_pos)
         clicked_selection = next((i for i in items_at_point if i in valid_items), None)
 
-        if clicked_selection:
-            # 如果点到了已有选区
-            if event.modifiers() & Qt.ControlModifier:
-                # 按住 Ctrl 点选 = 减选
-                self._remove_item(clicked_selection)
-                self.start_point = None  # 阻止拉出新框
-            else:
-                # 没按修饰键 = 准备移动该选区
-                self.moving_item = clicked_selection
-                self.last_move_pos = scene_pos
-            return  # 既然点到了东西，就不执行下面的“新建选区”逻辑
+        if clicked_selection and not is_shift and not is_alt_option:
+            self.moving_item = clicked_selection
+            self.last_move_pos = scene_pos
+            return
 
-        # 优先级 2：点在空白处，开始拉新选区 (加选)
+        # 2. 开始拉新选区
         if event.button() == Qt.LeftButton:
             from PySide6.QtWidgets import QGraphicsRectItem
 
             self.temp_rect = QGraphicsRectItem()
-            self.temp_rect.setPen(self.add_pen)
-            self.temp_rect.setBrush(self.add_color)
+
+            if is_alt_option:
+                # --- 减选模式 (红色) ---
+                self.temp_rect.setPen(self.dash_pen_remove)
+                self.temp_rect.setBrush(self.remove_color)
+                self.temp_rect.setData(0, "SUBTRACT")
+            elif is_shift:
+                # --- Shift 加选合并模式 (蓝色 + 标记) ---
+                self.temp_rect.setPen(self.add_pen)
+                self.temp_rect.setBrush(self.add_color)
+                self.temp_rect.setData(0, "MERGE")  # 特殊标记：需要合并
+            else:
+                # --- 默认创建模式 (蓝色) ---
+                self.temp_rect.setPen(self.add_pen)
+                self.temp_rect.setBrush(self.add_color)
+                self.temp_rect.setData(0, "CREATE")  # 标记：直接创建
+
             self.temp_rect.setZValue(1000)
             self.scene.addItem(self.temp_rect)
 
@@ -582,25 +600,52 @@ class SelectionManager:
         self.scene.update()
 
     def handle_mouse_release(self, event, scene_pos):
-        if self.temp_rect is None:  # 移除对 self.active 的强依赖判定
+        if self.temp_rect is None:
             return
 
         final_rect = self.temp_rect.rect()
-
-        # 判定是一个有效的矩形选区还是一个无意的“点击”
         if final_rect.width() > 2 and final_rect.height() > 2:
-            # 有效选区：存入列表
-            self.selections.append(self.temp_rect)
-            print(f"DEBUG: Selection created: {final_rect}")
-            self.temp_rect = None  # 释放引用，但不关闭 active
+            mode = self.temp_rect.data(0)
+            new_path = QPainterPath()
+            new_path.addRect(final_rect)
+
+            if mode == "SUBTRACT":
+                # --- 减选逻辑 (保持不变) ---
+                for item in self.selections[:]:
+                    item_path = self._get_item_path(item)
+                    if item_path.intersects(new_path):
+                        res_path = item_path.subtracted(new_path)
+                        if res_path.isEmpty():
+                            self._remove_item(item)
+                        else:
+                            self._update_item_shape(item, res_path)
+                self.scene.removeItem(self.temp_rect)
+
+            elif mode == "MERGE":
+                # --- Shift 合并模式：寻找相交的并合并 ---
+                merged = False
+                for item in self.selections[:]:
+                    item_path = self._get_item_path(item)
+                    if item_path.intersects(new_path):
+                        union_path = item_path.united(new_path)
+                        self._update_item_shape(item, union_path)
+                        merged = True
+                        break
+
+                if not merged:
+                    # 如果没点到任何旧选区，就作为一个新选区加入
+                    self.selections.append(self.temp_rect)
+                else:
+                    self.scene.removeItem(self.temp_rect)
+
+            else:  # mode == "CREATE"
+                # --- 默认模式：直接创建，无视重叠 ---
+                self.selections.append(self.temp_rect)
+
+            self.temp_rect = None
         else:
-            # 无效点击：从场景移除
             if self.temp_rect.scene():
                 self.scene.removeItem(self.temp_rect)
             self.temp_rect = None
 
-        # --- 关键修改 ---
-        # 不要在这里设置 self.active = False
-        # 因为 active 应该由 ManualEditor 切换工具时统一控制
-        # 只要用户还没点别的工具，RECT 模式就应该是 active 的
         self.start_point = None
