@@ -144,39 +144,55 @@ class SelectionManager:
         self.selections.append(item)
 
     def handle_double_click(self, scene_pos):
-        print(1)
         if not self.active:
             return
-        valid_items = self._get_valid_selections()
-        items = self.scene.items(scene_pos)
-        clicked = [i for i in items if i in valid_items]
-        if clicked:
-            print(2)
-            self._remove_item(clicked[0])
+
+        print(f"DEBUG: Entering Double Click Logic at {scene_pos}")
+
+        # 1. 明确我们要寻找的目标类型
+
+        # 2. 获取该点下所有的物体
+        items_at_point = self.scene.items(scene_pos)
+
+        # 3. 过滤出真正的选区对象
+        # 排除 temp_rect，且必须是 selections 列表中的成员
+        clicked_selections = [
+            i for i in items_at_point if i in self.selections and i != self.temp_rect
+        ]
+
+        if clicked_selections:
+            # 情况 A：点中了某个选区
+            print(
+                f"DEBUG: Hit existing selection ({type(clicked_selections[0])})! Removing..."
+            )
+            self._remove_item(clicked_selections[0])
         else:
+            # 情况 B：该点下没有任何属于 selections 的物体
+            # 无论下面是背景图还是棋盘格，只要不是选区框，就执行全清
+            print("DEBUG: Hit empty space! Clearing ALL selections...")
             self.clear_selections()
-            print(3)
+
+            # 关键：手动清理双击产生的那个微小残留
+            if self.temp_rect:
+                if self.temp_rect.scene():
+                    self.scene.removeItem(self.temp_rect)
+                self.temp_rect = None
 
     def clear_selections(self, target_frame_data=None):
-        """
-        物理清理所有选区。
-        target_frame_data: 如果传入，则强制合并到这个数据对象中，解决切换帧时的“时差”问题。
-        """
         if not self.selections:
             return
 
         for item in self.selections[:]:
-            # 执行合并逻辑
-            # 注意：如果 target_frame_data 为空，它内部会去猜 currentRow，所以我们建议在 editor 切换时必传
-            self._merge_back_to_bg(item, target_frame_data=target_frame_data)
+            # 如果你希望双击空白是【取消】而不是【合并】，请注释掉下面这行
+            # self._merge_back_to_bg(item, target_frame_data=target_frame_data)
 
-            # 从场景物理移除
             if item.scene():
                 self.scene.removeItem(item)
 
         self.selections.clear()
         self.moving_item = None
-        self.active = False
+        # 保持 active 状态，除非你想让工具直接退出
+        # self.active = False
 
     def _apply_transparent_holes(self, bg_item):
         """
@@ -525,27 +541,35 @@ class SelectionManager:
     # selection_manager.py
 
     def handle_mouse_press(self, event, scene_pos):
-        print("!!! HIT MANAGER PRESS !!!")
-        """由 ScalableView 转发过来，确保只接两个参数"""
-        # 强制清除之前的状态
-        if self.temp_rect:
-            if self.temp_rect.scene():
-                self.scene.removeItem(self.temp_rect)
-            self.temp_rect = None
-
-        self.start_point = scene_pos
         self.active = True
+        self.start_point = scene_pos
 
+        # 优先级 1：检查是否点到了已有的选区（用于移动或减选）
+        valid_items = self._get_valid_selections()
+        items_at_point = self.scene.items(scene_pos)
+        clicked_selection = next((i for i in items_at_point if i in valid_items), None)
+
+        if clicked_selection:
+            # 如果点到了已有选区
+            if event.modifiers() & Qt.ControlModifier:
+                # 按住 Ctrl 点选 = 减选
+                self._remove_item(clicked_selection)
+                self.start_point = None  # 阻止拉出新框
+            else:
+                # 没按修饰键 = 准备移动该选区
+                self.moving_item = clicked_selection
+                self.last_move_pos = scene_pos
+            return  # 既然点到了东西，就不执行下面的“新建选区”逻辑
+
+        # 优先级 2：点在空白处，开始拉新选区 (加选)
         if event.button() == Qt.LeftButton:
             from PySide6.QtWidgets import QGraphicsRectItem
 
             self.temp_rect = QGraphicsRectItem()
             self.temp_rect.setPen(self.add_pen)
             self.temp_rect.setBrush(self.add_color)
-            self.temp_rect.setZValue(1000)  # 置顶
+            self.temp_rect.setZValue(1000)
             self.scene.addItem(self.temp_rect)
-            # 这行如果没印出来，说明 ScalableView 根本没能成功调用到这个版本的函数
-            print(f"DEBUG: Manager received Press at {scene_pos}")
 
     def handle_mouse_move(self, event, scene_pos):
         if not self.active or self.start_point is None or self.temp_rect is None:
@@ -558,18 +582,25 @@ class SelectionManager:
         self.scene.update()
 
     def handle_mouse_release(self, event, scene_pos):
-        if not self.active or self.temp_rect is None:
+        if self.temp_rect is None:  # 移除对 self.active 的强依赖判定
             return
 
         final_rect = self.temp_rect.rect()
+
+        # 判定是一个有效的矩形选区还是一个无意的“点击”
         if final_rect.width() > 2 and final_rect.height() > 2:
+            # 有效选区：存入列表
             self.selections.append(self.temp_rect)
             print(f"DEBUG: Selection created: {final_rect}")
-            self.temp_rect = None
+            self.temp_rect = None  # 释放引用，但不关闭 active
         else:
+            # 无效点击：从场景移除
             if self.temp_rect.scene():
                 self.scene.removeItem(self.temp_rect)
             self.temp_rect = None
 
-        self.active = False
+        # --- 关键修改 ---
+        # 不要在这里设置 self.active = False
+        # 因为 active 应该由 ManualEditor 切换工具时统一控制
+        # 只要用户还没点别的工具，RECT 模式就应该是 active 的
         self.start_point = None

@@ -1045,6 +1045,7 @@ class ManualEditor(QWidget, EditorUI):
                 # --- 处理双击清空 ---
                 elif event.type() == QEvent.MouseButtonDblClick:
                     print("DEBUG Filter: Double Click detected")
+                    scene_pos = self.view.mapToScene(event.pos())
                     self.selection_manager.handle_double_click(scene_pos)
                     return True
 
