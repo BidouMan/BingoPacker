@@ -489,107 +489,103 @@ class ManualEditor(QWidget, EditorUI):
         return QPoint(int(scene_pos.x()), int(scene_pos.y()))
 
     def handle_magic_wand_click(self, scene_pos):
-        """
-        处理魔棒点击：
-        勾选连续 (isChecked) -> 只选相连的一坨
-        不勾选连续 -> 全图选所有颜色相近的点
-        """
-
-        # 1. 确定当前操作的图元
         target_item = (
-            self.preview_item
-            if (self.preview_item and self.preview_item.isVisible())
-            else None
-        )
-        if not target_item and hasattr(self, "pixmap_item"):
-            target_item = self.pixmap_item
-
-        if not target_item or not target_item.pixmap():
-            return
-
-        # 2. 坐标转换：将场景坐标映射到图元内部像素坐标
-        local_pos_f = target_item.mapFromScene(scene_pos)
-        item_pos = local_pos_f.toPoint()
-
-        # 3. 边界检查与图像准备
-        img = target_item.pixmap().toImage()
-        if not img.rect().contains(item_pos):
-            return
-
-        # 4. 【关键步骤】读取 UI 状态
-        # 你的需求：勾选了“连续” -> 选一坨 (contiguous=True)
-        #           没勾选“连续” -> 选全图 (contiguous=False)
-        is_contiguous_mode = self.check_contiguous.isChecked()
-
-        # 读取滑动条的实时容差值
-        current_tolerance = self.slider_tolerance.value()
-
-        # 5. 配置并执行魔棒算法
-        self.magic_wand.tolerance = current_tolerance
-
-        # 显式传入 is_contiguous_mode
-        # 注意：请确保 magic_wand.py 中的 get_selection_region 函数签名已更新为接收这个参数
-        selection_region = self.magic_wand.get_selection_region(
-            img, item_pos, contiguous=is_contiguous_mode
-        )
-
-        # 6. 存储选区并触发蚂蚁线渲染
-        self.selection_mask = selection_region
-        self.update_selection_display(selection_region)
-
-    def update_selection_display(self, region):
-        def clear_ants():
-            if hasattr(self, "ants_timer") and self.ants_timer:
-                self.ants_timer.stop()
-                self.ants_timer = None
-            if hasattr(self, "temp_mask_item") and self.temp_mask_item:
-                if self.temp_mask_item.scene():
-                    self.scene.removeItem(self.temp_mask_item)
-                self.temp_mask_item = None
-
-        # 1. 如果传入空区域，直接清理并返回
-        if region is None or region.isEmpty():
-            clear_ants()
-            return
-
-        # 2. 检查或创建 Item
-        if not hasattr(self, "temp_mask_item") or not self.temp_mask_item:
-            # 首次创建
-            self.temp_mask_item = SelectionAntsItem(region)
-            self.scene.addItem(self.temp_mask_item)
-
-            if not hasattr(self, "ants_timer") or self.ants_timer is None:
-                self.ants_timer = QTimer(self)
-                self.ants_timer.timeout.connect(self._animate_ants)
-                self.ants_timer.start(80)
-        else:
-            # 关键修复：点击新位置时，强制更新 Item 内部的 Region 数据
-            # 确保你的 SelectionAntsItem 类里有这个方法且调用了 self.update()
-            self.temp_mask_item.update_region(region)
-
-        # 3. 坐标同步 (移出 else 分支，确保每次点击都重新对齐)
-        # 这解决了“点击新位置但不更新显示”或“位置错位”的问题
-        target = (
             self.preview_item
             if (self.preview_item and self.preview_item.isVisible())
             else self.pixmap_item
         )
-        if target and self.temp_mask_item:
-            self.temp_mask_item.setPos(target.pos())
-            self.temp_mask_item.setTransform(target.transform())
-            # 强制重绘，确保新选区立即出现
-            self.temp_mask_item.update()
+        if not target_item or not target_item.pixmap():
+            return
+
+        # 获取本地坐标
+        local_pos = target_item.mapFromScene(scene_pos).toPoint()
+        print(f"DEBUG [Editor]: 场景坐标{scene_pos} -> 本地像素坐标{local_pos}")
+
+        img = target_item.pixmap().toImage()
+        self.magic_wand.tolerance = self.slider_tolerance.value()
+
+        # 计算选区
+        region = self.magic_wand.get_selection_region(
+            img, local_pos, contiguous=self.check_contiguous.isChecked()
+        )
+
+        # 关键：更新选区并同步变换
+        self.selection_mask = region
+        self.update_selection_display(region)
+
+        # 视觉同步：解决“看起来像全选”的视觉误差
+        if hasattr(self, "temp_mask_item") and self.temp_mask_item:
+            # 蚂蚁线图元必须和底图在坐标空间上完全对等
+            self.temp_mask_item.setParentItem(target_item)  # 设置为底图的子项
+            self.temp_mask_item.setPos(0, 0)  # 相对位置归零
+            self.temp_mask_item.setTransform(
+                target_item.transform()
+            )  # 确保变换矩阵一致
+            print(f"DEBUG [Editor]: 选区矩形数量: {region.rectCount()}")
+
+    def update_selection_display(self, region):
+        """
+        更新并显示魔棒选区。
+        """
+        # 1. 彻底清理旧选区，防止残留
+        if hasattr(self, "temp_mask_item") and self.temp_mask_item:
+            print("DEBUG [Editor]: 移除旧选区图元")
+            if self.temp_mask_item.scene():
+                self.scene.removeItem(self.temp_mask_item)
+            self.temp_mask_item = None
+
+        if region is None or region.isEmpty():
+            print("DEBUG [Editor]: 传入选区为空，停止动画")
+            if hasattr(self, "ants_timer") and self.ants_timer:
+                self.ants_timer.stop()
+                self.ants_timer = None
+            return
+
+        # 2. 核心修复：安全地获取目标底图
+        # 使用 getattr 防御 NoneType 错误
+        preview_item = getattr(self, "preview_item", None)
+        pixmap_item = getattr(self, "pixmap_item", None)
+
+        target = None
+        if preview_item is not None:
+            try:
+                if preview_item.isVisible():
+                    target = preview_item
+            except (RuntimeError, AttributeError):
+                pass
+
+        if target is None:
+            target = pixmap_item
+
+        if target is None:
+            print("DEBUG [Editor]: 关键错误 - 找不到任何可用的底图 target")
+            return
+
+        # 3. 创建全新蚂蚁线图元
+        print(f"DEBUG [Editor]: 创建新选区图元，精准边界: {region.boundingRect()}")
+        self.temp_mask_item = SelectionAntsItem(region)
+        self.scene.addItem(self.temp_mask_item)
+
+        # 将选区挂载到图片图元上，使其跟随图片缩放/移动
+        self.temp_mask_item.setParentItem(target)
+        self.temp_mask_item.setPos(0, 0)
+        self.temp_mask_item.setZValue(target.zValue() + 100)
+
+        # 4. 动画控制
+        if not hasattr(self, "ants_timer") or self.ants_timer is None:
+            self.ants_timer = QTimer(self)
+            self.ants_timer.timeout.connect(self._animate_ants)
+            self.ants_timer.start(150)
+            print("DEBUG [Editor]: 启动动画计时器")
+
+        self.temp_mask_item.update()  # 确保在最上层
 
     def _animate_ants(self):
         if hasattr(self, "temp_mask_item") and self.temp_mask_item:
-            try:
-                # 只是改变偏移量并触发重绘
-                self.temp_mask_item.offset = (self.temp_mask_item.offset + 1) % 8
-                self.temp_mask_item.update()
-            except RuntimeError:
-                # 防止对象被意外删除导致的崩溃
-                if self.ants_timer:
-                    self.ants_timer.stop()
+            self.temp_mask_item.offset += 1
+            if self.temp_mask_item.offset > 8:  # 虚线周期长度
+                self.temp_mask_item.offset = 0
+            self.temp_mask_item.update()
 
     # def on_magic_wand_toggled(self, checked):
     #     """当魔棒按钮状态切换时触发"""
@@ -1091,8 +1087,8 @@ class ManualEditor(QWidget, EditorUI):
         self.current_tool_mode = mode
         print(f"Tool changed to: {mode}")
 
-        # is_wand = mode == ToolMode.MAGIC_WAND
-        # self.magic_wand_panel.setVisible(is_wand)
+        is_wand = mode == ToolMode.MAGIC_WAND
+        self.magic_wand_panel.setVisible(is_wand)
 
         # --- 第三阶段：初始化新工具 (Activate) ---
         self._activate_new_tool(mode)

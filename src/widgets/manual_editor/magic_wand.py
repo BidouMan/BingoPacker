@@ -1,126 +1,67 @@
+import numpy as np
+import cv2
 from PySide6.QtWidgets import QGraphicsItem
-from PySide6.QtCore import QTimer, Qt, QRectF, QRect
-from PySide6.QtGui import QPen, QPainterPath, QImage, QRegion, QBitmap
+from PySide6.QtCore import QTimer, Qt, QRectF, QRect, QPoint
+from PySide6.QtGui import QPen, QPainterPath, QImage, QRegion, QPainter, QPolygon
 
 
 class MagicWandTool:
-    def __init__(self, tolerance=20):
+    def __init__(self, tolerance=25):
         self.tolerance = tolerance
 
-    def is_color_similar(self, c1, c2):
-        # 1. 如果其中一个是完全透明，另一个不是，直接判定为不相似
-        if (c1.alpha() < 5) != (c2.alpha() < 5):
-            return False
-
-        # 2. 使用欧几里得距离计算 RGB 差异 (更精准的数学模型)
-        # 这样 (255, 89, 0) 和 (255, 0, 0) 之间的距离是 89，会比平均值更敏感
-        import math
-
-        distance = math.sqrt(
-            (c1.red() - c2.red()) ** 2
-            + (c1.green() - c2.green()) ** 2
-            + (c1.blue() - c2.blue()) ** 2
-            + (c1.alpha() - c2.alpha()) ** 2
-        )
-
-        # 此时的 tolerance 建议设置在 10-30 之间
-        return distance <= self.tolerance
-
     def get_selection_region(self, image, start_point, contiguous=True):
-        if image.isNull() or not image.rect().contains(start_point):
+        if image.isNull():
             return QRegion()
 
-        # 1. 性能优化：直接转换成 32位 格式，并获取原始字节（避开像素对象创建）
-        img = image.convertToFormat(QImage.Format_ARGB32)
-        width, height = img.width(), img.height()
+        temp_img = image.convertToFormat(QImage.Format_ARGB32)
+        width, height = temp_img.width(), temp_img.height()
 
-        # 2. 预计算容差平方，省去 math.sqrt
-        tol_sq = self.tolerance**2
-        target_color = img.pixelColor(start_point)
-        tr, tg, tb, ta = (
-            target_color.red(),
-            target_color.green(),
-            target_color.blue(),
-            target_color.alpha(),
+        ix = max(0, min(width - 1, int(start_point.x())))
+        iy = max(0, min(height - 1, int(start_point.y())))
+
+        # 1. 提取原始数据
+        ptr = temp_img.bits()
+        arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
+        target_pixel = arr[iy, ix].astype(np.int32)
+        print(f"DEBUG [MagicWand]: 起点像素 {target_pixel}, 容差 {self.tolerance}")
+
+        # 2. 计算掩码 (RGB)
+        diff = np.abs(arr[:, :, :3].astype(np.int32) - target_pixel[:3])
+        mask = np.all(diff <= self.tolerance, axis=2)
+
+        # 3. 处理连通性
+        if contiguous:
+            mask_uint8 = mask.astype(np.uint8) * 255
+            num_labels, labels = cv2.connectedComponents(mask_uint8, connectivity=4)
+            start_label = labels[iy, ix]
+            if start_label > 0:
+                mask = labels == start_label
+            else:
+                print("DEBUG [MagicWand]: 起点不满足容差，连通域为空")
+                return QRegion()
+
+        # 4. --- 根源级修复：像素行扫描构建 QRegion ---
+        # 这种方法直接通过像素索引构建，保证 100% 对应，不会少一像素
+        q_region = QRegion()
+        rect_count = 0
+
+        for y in range(height):
+            row = mask[y, :]
+            # 寻找连续段的起点和终点
+            x_diff = np.diff(row.astype(np.int8), prepend=0, append=0)
+            starts = np.where(x_diff == 1)[0]
+            ends = np.where(x_diff == -1)[0]
+
+            for s, e in zip(starts, ends):
+                # QRect(x, y, width, height)
+                # 宽度 e-s 严格等于像素个数
+                q_region += QRegion(QRect(s, y, e - s, 1))
+                rect_count += 1
+
+        print(
+            f"DEBUG [MagicWand]: 扫描完成。像素总数: {np.sum(mask)}, 构建矩形数: {rect_count}, 最终边界: {q_region.boundingRect()}"
         )
-
-        # 创建 Mask 图像 (Mono 格式最省内存)
-        mask = QImage(img.size(), QImage.Format_Mono)
-        mask.fill(0)
-
-        # 快速颜色检查函数 (直接比较数值，不创建 QColor)
-        def check_pixel(px_color):
-            r, g, b, a = (
-                px_color.red(),
-                px_color.green(),
-                px_color.blue(),
-                px_color.alpha(),
-            )
-            if (a < 5) != (ta < 5):
-                return False
-            dist_sq = (r - tr) ** 2 + (g - tg) ** 2 + (b - tb) ** 2 + (a - ta) ** 2
-            return dist_sq <= tol_sq
-
-        if not contiguous:
-            # 全图模式优化：逐像素扫描
-            for y in range(height):
-                for x in range(width):
-                    if check_pixel(img.pixelColor(x, y)):
-                        mask.setPixel(x, y, 1)
-        else:
-            # --- 扫描线填充算法 (Scanline Fill) ---
-            # 相比普通泛洪，入栈次数减少 90% 以上
-            stack = [
-                (start_point.x(), start_point.x(), start_point.y(), 1),
-                (start_point.x(), start_point.x(), start_point.y(), -1),
-            ]
-
-            # 使用一个 bytearray 做访问标记，比 set((x,y)) 快几十倍
-            visited_mask = bytearray(width * height)
-
-            while stack:
-                x1, x2, y, dy = stack.pop()
-                x = x1
-                if 0 <= y + dy < height:
-                    target_y = y + dy
-                    # 向上/下扫描一行
-                    while x <= x2:
-                        if not visited_mask[target_y * width + x] and check_pixel(
-                            img.pixelColor(x, target_y)
-                        ):
-                            # 找到一个起点，向左扩展
-                            start_x = x
-                            while (
-                                start_x > 0
-                                and not visited_mask[target_y * width + start_x - 1]
-                                and check_pixel(img.pixelColor(start_x - 1, target_y))
-                            ):
-                                mask.setPixel(start_x - 1, target_y, 1)
-                                visited_mask[target_y * width + start_x - 1] = 1
-                                start_x -= 1
-
-                            # 向右扩展
-                            while x < width and check_pixel(
-                                img.pixelColor(x, target_y)
-                            ):
-                                mask.setPixel(x, target_y, 1)
-                                visited_mask[target_y * width + x] = 1
-                                x += 1
-
-                            # 将这一段扫描线入栈
-                            stack.append((start_x, x - 1, target_y, dy))
-                            if x - 1 > x2:
-                                stack.append((start_x, x - 1, target_y, -dy))
-                        x += 1
-
-        # 3. 极速转换
-        selection_bitmap = QBitmap.fromImage(mask)
-        region = QRegion(selection_bitmap)
-
-        if not region.contains(start_point):
-            region = QRegion(QRect(0, 0, width, height)).subtracted(region)
-
-        return region.intersected(QRect(0, 0, width, height))
+        return q_region
 
 
 class SelectionAntsItem(QGraphicsItem):
@@ -128,52 +69,60 @@ class SelectionAntsItem(QGraphicsItem):
         super().__init__(parent)
         self.region = region
         self.offset = 0
-        self.setZValue(9999)
         self._path = QPainterPath()
         if not self.region.isEmpty():
             self._generate_outline()
 
     def _generate_outline(self):
         """
-        不再调用 rects() 或 toPolygons()，直接利用 QPainterPath 的内置转换
+        核心修复：将碎片化的矩形合并为统一的外轮廓
         """
-        self._path = QPainterPath()
-        # 直接将 QRegion 加入路径，这是 Qt 内部最高效且最稳定的方法
-        self._path.addRegion(self.region)
+        # 1. 直接将 region 添加到路径中
+        # addRegion 内部会尝试组合矩形，但通常还是保留了矩形结构
+        raw_path = QPainterPath()
+        raw_path.addRegion(self.region)
 
-        # 针对你说的“拼接线”问题：
-        # 这里必须调用 simplified()，它是消除内部矩形重合线的唯一方法
-        self._path = self._path.simplified()
+        # 2. 关键点：使用 simplified()
+        # 它会合并所有共线的边，删除图形内部的线条，只留下外边界
+        self._path = raw_path.simplified()
 
-    def update_region(self, new_region):
-        self.prepareGeometryChange()
-        self.region = new_region
-        if not self.region.isEmpty():
-            self._generate_outline()
-        else:
-            self._path = QPainterPath()
-        self.update()
+        # 3. 容错处理：如果简化失败（极其复杂的情况），至少保证能看到东西
+        if self._path.isEmpty() and not self.region.isEmpty():
+            print("DEBUG [AntsItem]: simplified 结果为空，回退到原始矩形绘制")
+            for rect in self.region:
+                self._path.addRect(QRectF(rect))
+
+        print(
+            f"DEBUG [AntsItem]: 路径合并完成。矩形数: {self.region.rectCount()}, 路径元素数: {self._path.elementCount()}"
+        )
+        print(f"DEBUG [AntsItem]: 最终路径边界: {self._path.boundingRect()}")
 
     def boundingRect(self):
-        if self.region.isEmpty():
-            return QRectF()
-        # 必须涵盖整个选区，并留出 2 像素给线宽
-        return QRectF(self.region.boundingRect()).adjusted(-2, -2, 2, 2)
+        # 边界需要稍微扩大，以容纳 1 像素宽的虚线
+        return QRectF(self.region.boundingRect()).adjusted(-1, -1, 1, 1)
 
     def paint(self, painter, option, widget):
         if self.region.isEmpty() or self._path.isEmpty():
             return
 
-        # 1. 绘制白色底边 (实线)
-        w_pen = QPen(Qt.white, 1)
-        w_pen.setCosmetic(True)  # 保证缩放时线条不会变粗
+        # 保持锐利度
+        painter.setRenderHint(QPainter.Antialiasing, False)
+
+        # 设置虚线笔触（Cosmetic 确保缩放不影响线宽）
+        w_pen = QPen(Qt.white, 0)
+        w_pen.setCosmetic(True)
+        w_pen.setStyle(Qt.CustomDashLine)
+        w_pen.setDashPattern([4, 4])
+        w_pen.setDashOffset(self.offset)
+
+        b_pen = QPen(Qt.black, 0)
+        b_pen.setCosmetic(True)
+        b_pen.setStyle(Qt.CustomDashLine)
+        b_pen.setDashPattern([4, 4])
+        b_pen.setDashOffset(self.offset + 4)
+
+        # 只绘制路径，即合并后的外轮廓
         painter.setPen(w_pen)
         painter.drawPath(self._path)
-
-        # 2. 绘制黑色虚线 (蚂蚁线)
-        b_pen = QPen(Qt.black, 1, Qt.DashLine)
-        b_pen.setDashPattern([4, 4])
-        b_pen.setDashOffset(self.offset)
-        b_pen.setCosmetic(True)
         painter.setPen(b_pen)
         painter.drawPath(self._path)
