@@ -97,11 +97,6 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_new_file.clicked.connect(self.clear_all)
         self.btn_save.clicked.connect(self.on_save_clicked)
 
-        # self.btn_magic_wand.toggled.connect(self.on_magic_wand_toggled) # 切换魔棒工具
-        # self.btn_pick.toggled.connect(self.selection_manager.set_active)#切换选区工具(框选图像)
-        # self.btn_slice.clicked.connect(self.on_do_slice)                # 切换只能裁切工具(自动将当前精灵表裁切成序列帧)
-        # self.btn_cut.clicked.connect(self.on_cut_mode_toggled)          # 切换调整画布尺寸(类似PS中的裁切工具)
-
         self.btn_magic_wand.clicked.connect(
             lambda: self.set_tool_mode(ToolMode.MAGIC_WAND)
         )
@@ -420,6 +415,14 @@ class ManualEditor(QWidget, EditorUI):
 
     def clear_all(self):
         """完全清空编辑器状态并重置全局环境"""
+
+        # 先让所有工具管理器松手，防止后续事件触发 RuntimeError
+        if hasattr(self, "selection_manager"):
+            self.selection_manager.force_reset_internal()
+
+        if hasattr(self, "magic_wand_tool") and self.magic_wand_tool:
+            self.magic_wand_tool.reset()
+
         # 1. 清理数据管理层 (核心：防止 AssetTree 残留)
         self.update_selection_display(QRegion())
         self.asset_manager.clear_all()
@@ -441,7 +444,7 @@ class ManualEditor(QWidget, EditorUI):
 
         # 4. --- 关键步骤：通知全局 UI ---
         # 发射 bundle_updated 信号，但传递 None，表示“当前已无活动资源”
-        self.bundle_updated.emit(None)
+        self.bundle_updated.emit(None, {})
 
     def import_project_file(self, file_path):
         """导入并还原工程文件数据到编辑器 UI"""
@@ -978,10 +981,33 @@ class ManualEditor(QWidget, EditorUI):
         # 7. 退出工具模式
         self.set_tool_mode(ToolMode.IDLE)
 
+    def _reset_tool_buttons(self):
+        """将所有工具按钮恢复到未选中状态"""
+        self.btn_pick.blockSignals(True)
+        self.btn_pick.setChecked(False)
+        self.btn_magic_wand.blockSignals(True)
+        self.btn_magic_wand.setChecked(False)
+        self.btn_cut.blockSignals(True)
+        self.btn_cut.setChecked(False)
+        # ... 如果还有其他工具按钮，也写在这里 ...
+        self.btn_pick.blockSignals(False)
+        self.btn_magic_wand.blockSignals(False)
+        self.btn_cut.blockSignals(False)
+
     def set_tool_mode(self, mode):
         """
         切换工具模式的唯一入口，负责清理旧状态和初始化新状态
         """
+        # 如果不是切换到 IDLE，且当前没有任何底图，则拦截
+        if mode != ToolMode.IDLE:
+            target = self.get_active_preview_item()
+            if not target or not target.pixmap() or target.pixmap().isNull():
+                # 强制弹回所有工具按钮的状态（取消选中）
+                self._reset_tool_buttons()
+                return
+
+        if self.current_tool_mode == mode:
+            return
 
         # --- 第一阶段：清理旧工具 (Deactivate) ---
         self._cleanup_current_tool()
