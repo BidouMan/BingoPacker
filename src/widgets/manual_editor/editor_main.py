@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QGraphicsView,
 )
-from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint
+from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent
 from PySide6.QtGui import (
     QPixmap,
     QIcon,
@@ -27,6 +27,7 @@ from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
 from .magic_wand import MagicWandTool
 from .crop_tool import CropBoxItem
+from .constants import ToolMode
 
 
 class ManualEditor(QWidget, EditorUI):
@@ -35,6 +36,14 @@ class ManualEditor(QWidget, EditorUI):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setup_ui(self)
+        # 初始化 UI
+
+        self.scene = QGraphicsScene()
+        self.view = ScalableView(self.scene)
+        self.canvas_layout.addWidget(self.view)
+        self.current_tool_mode = ToolMode.IDLE  # 鼠标状态
+        self.view.viewport().installEventFilter(self)
         self.asset_manager = AssetManager()
         self.current_bundle = None
         self.slice_logic = SliceLogic()
@@ -47,12 +56,6 @@ class ManualEditor(QWidget, EditorUI):
         self.undo_stack = []
         self.max_undo_steps = 20
         self.last_index = -1
-
-        # 初始化 UI
-        self.setup_ui(self)
-        self.scene = QGraphicsScene()
-        self.view = ScalableView(self.scene)
-        self.canvas_layout.addWidget(self.view)
 
         self.selection_manager = SelectionManager(self.scene)
         # self.selection_manager = SelectionManager(self.scene)
@@ -91,14 +94,23 @@ class ManualEditor(QWidget, EditorUI):
             self.bundle_updated.emit(bundle, curr_seg)
 
     def connect_signals(self):
+        self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
+
         # 确保 UI 中的所有按钮都正确绑定
         self.btn_new_file.clicked.connect(self.clear_all)
-        self.btn_magic_wand.toggled.connect(self.on_magic_wand_toggled)
-        self.btn_pick.toggled.connect(self.selection_manager.set_active)
-        self.btn_slice.clicked.connect(self.on_do_slice)
-        self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
         self.btn_save.clicked.connect(self.on_save_clicked)
-        self.btn_cut.clicked.connect(self.on_cut_mode_toggled)
+
+        # self.btn_magic_wand.toggled.connect(self.on_magic_wand_toggled) # 切换魔棒工具
+        # self.btn_pick.toggled.connect(self.selection_manager.set_active)#切换选区工具(框选图像)
+        # self.btn_slice.clicked.connect(self.on_do_slice)                # 切换只能裁切工具(自动将当前精灵表裁切成序列帧)
+        # self.btn_cut.clicked.connect(self.on_cut_mode_toggled)          # 切换调整画布尺寸(类似PS中的裁切工具)
+
+        self.btn_magic_wand.clicked.connect(
+            lambda: self.set_tool_mode(ToolMode.MAGIC_WAND)
+        )
+        self.btn_pick.clicked.connect(lambda: self.set_tool_mode(ToolMode.RECT_SELECT))
+        self.btn_cut.clicked.connect(lambda: self.set_tool_mode(ToolMode.CROP))
+        self.btn_slice.clicked.connect(self.on_do_slice)
 
         # 魔棒工具按钮功能
         self.slider_tolerance.valueChanged.connect(self._on_tolerance_changed)
@@ -1015,35 +1027,50 @@ class ManualEditor(QWidget, EditorUI):
         super().keyPressEvent(event)
 
     def eventFilter(self, source, event):
-        # 监控发往 列表 或 视图 的键盘按下事件
-        if event.type() == event.Type.KeyPress:
+        # --- 1. 处理鼠标事件 (解决选区不触发的核心) ---
+        if source == self.view.viewport():
+            mode = self.current_tool_mode
+
+            # 只在选区模式下接管鼠标
+            if mode == ToolMode.RECT_SELECT:
+                # 获取场景坐标 (在过滤器里我们需要手动转换)
+                if hasattr(event, "pos"):
+                    scene_pos = self.view.mapToScene(event.pos())
+
+                if event.type() == QEvent.MouseButtonPress:
+                    print(f"DEBUG Filter: Mouse Press at {scene_pos}")
+                    self.selection_manager.handle_mouse_press(event, scene_pos)
+                    return True  # 拦截，不给 View 内部平移逻辑机会
+
+                # --- 处理双击清空 ---
+                elif event.type() == QEvent.MouseButtonDblClick:
+                    print("DEBUG Filter: Double Click detected")
+                    self.selection_manager.handle_double_click(scene_pos)
+                    return True
+
+                elif event.type() == QEvent.MouseMove:
+                    self.selection_manager.handle_mouse_move(event, scene_pos)
+                    return True
+
+                elif event.type() == QEvent.MouseButtonRelease:
+                    self.selection_manager.handle_mouse_release(event, scene_pos)
+                    return True
+
+        # --- 2. 处理键盘事件 (你原有的逻辑) ---
+        if event.type() == QEvent.KeyPress:
             modifiers = event.modifiers()
-            is_ctrl = bool(
-                modifiers
-                & (
-                    Qt.KeyboardModifier.ControlModifier
-                    | Qt.KeyboardModifier.MetaModifier
-                )
-            )
+            is_ctrl = bool(modifiers & (Qt.ControlModifier | Qt.MetaModifier))
             key = event.key()
 
-            # 如果按下的是 Ctrl/Command + 方向键
             if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-                print(f"DEBUG: 过滤器截获按键 {key}")  # 这次一定会打印
+                print(f"DEBUG Filter: Key Nudge {key}")
+                is_shift = bool(modifiers & Qt.ShiftModifier)
 
-                is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-
-                # 逻辑分流
-                if self.btn_pick.isChecked():
-                    # 方案：调用 SelectionManager
+                if self.current_tool_mode == ToolMode.RECT_SELECT:
                     self.selection_manager.handle_key_nudge(key, is_shift)
                 else:
-                    # 方案：整体图像移动
                     self.handle_pixel_nudge(key, is_shift)
-
-                return (
-                    True  # 【关键】返回 True 表示拦截，不再传给列表，列表就不会切换帧了
-                )
+                return True
 
         return super().eventFilter(source, event)
 
@@ -1077,3 +1104,46 @@ class ManualEditor(QWidget, EditorUI):
 
         self.bundle_updated.emit(self.current_bundle, curr_seg)
         print(f"DEBUG: [Sync Success] {self.current_bundle.name} 数据已入库")
+
+    # -----------------------------------------------------------------
+
+    def set_tool_mode(self, mode):
+        """
+        切换工具模式的唯一入口，负责清理旧状态和初始化新状态
+        """
+        # 如果重复点击当前已经激活的工具，可以选择跳过或触发取消行为
+        # if self.current_tool_mode == mode: return
+
+        # --- 第一阶段：清理旧工具 (Deactivate) ---
+        self._cleanup_current_tool()
+
+        # --- 第二阶段：更新模式 ---
+        self.current_tool_mode = mode
+        print(f"Tool changed to: {mode}")
+
+        # --- 第三阶段：初始化新工具 (Activate) ---
+        self._activate_new_tool(mode)
+
+    def _cleanup_current_tool(self):
+        old_mode = self.current_tool_mode
+
+        if old_mode == ToolMode.RECT_SELECT:
+            self.selection_manager.active = False
+            self.selection_manager.abort_selection()  # 确保临时虚线框消失
+
+        elif old_mode == ToolMode.MAGIC_WAND:
+            self.magic_wand.clear_ants()
+            # 如果有魔棒选区遮罩，看需求决定是否清理
+
+        elif old_mode == ToolMode.CROP:
+            # 如果用户正在裁切时点别的工具，视为取消裁切
+            if hasattr(self, "crop_box") and self.crop_box:
+                self.scene.removeItem(self.crop_box)
+                self.crop_box = None
+
+    def _activate_new_tool(self, mode):
+        if mode == ToolMode.RECT_SELECT:
+            # 强制禁用 View 自身的拖拽模式，不让它跟我们的过滤器抢左键
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.selection_manager.active = True

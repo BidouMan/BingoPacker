@@ -69,82 +69,6 @@ class SelectionManager:
     def _snap_to_pixel(self, pos):
         return QPointF(round(pos.x()), round(pos.y()))
 
-    def handle_press(self, scene_pos, modifiers):
-        if not self.active:
-            return
-
-        # --- 1. 处理移动逻辑 (Ctrl/Cmd) ---
-        if (
-            modifiers & Qt.KeyboardModifier.ControlModifier
-            or modifiers & Qt.KeyboardModifier.MetaModifier
-        ):
-            items = self.scene.items(scene_pos)
-            valid_selections = self._get_valid_selections()
-            clicked = [i for i in items if i in valid_selections]
-
-            if clicked:
-                self.moving_item = clicked[0]
-                self.last_move_pos = scene_pos
-
-                bg_item = next(
-                    (
-                        i
-                        for i in self.scene.items()
-                        if isinstance(i, QGraphicsPixmapItem)
-                        and not hasattr(i, "is_clone")
-                    ),
-                    None,
-                )
-
-                if bg_item:
-                    # 如果该选区还没有对应的移动图层，就开始抠图
-                    if (
-                        not hasattr(self.moving_item, "pix_overlay")
-                        or self.moving_item.pix_overlay is None
-                    ):
-                        # 核心点：获取选区在底图上的精确局部坐标
-                        orig_rect_scene = self.moving_item.sceneBoundingRect()
-                        # 将场景坐标转为底图本地坐标
-                        local_top_left = bg_item.mapFromScene(
-                            orig_rect_scene.topLeft()
-                        ).toPoint()
-                        local_rect = QRect(
-                            local_top_left, orig_rect_scene.size().toSize()
-                        )
-
-                        # 1. 记录原始位置信息
-                        self.moving_item.setData(10, local_rect)
-
-                        # 2. 从当前底图中抠图
-                        crop_pix = bg_item.pixmap().copy(local_rect)
-
-                        # 3. 【关键修复】物理挖掉底图上这块像素，防止再次移动时重叠
-                        self._permanently_erase_pixels(bg_item, local_rect)
-
-                        # 4. 创建浮动层
-                        overlay = QGraphicsPixmapItem(crop_pix)
-                        overlay.is_clone = True
-                        overlay.setParentItem(self.moving_item)
-                        overlay.setZValue(-1)
-                        overlay.setPos(self.moving_item.boundingRect().topLeft())
-                        self.moving_item.pix_overlay = overlay
-                        self.moving_item.setBrush(self.add_color)
-                return
-
-        # --- 2. 正常框选逻辑 ---
-        self.start_point = self._snap_to_pixel(scene_pos)
-        self.temp_rect = QGraphicsRectItem()
-
-        # --- 修复点：判断是否按下了 Alt 键进入减选模式 ---
-        if modifiers & Qt.KeyboardModifier.AltModifier:
-            self.temp_rect.setPen(self.dash_pen_remove)  # 使用红色的虚线
-            self.temp_rect.setData(0, "remove")  # 设置为减选模式
-        else:
-            self.temp_rect.setPen(self.dash_pen_add)  # 使用蓝色的虚线
-            self.temp_rect.setData(0, "add")
-
-        self.scene.addItem(self.temp_rect)
-
     def _update_background_mask(self, bg_item):
         """
         实时计算所有已移动选区的原始位置，并让背景图在那块区域变透明
@@ -179,75 +103,6 @@ class SelectionManager:
         p.end()
 
         bg_item.setMask(mask_bitmap)
-
-    def handle_move(self, scene_pos):
-        if not self.active:
-            return
-
-        # 如果正在移动已有的选区图片
-        if self.moving_item:
-            snapped_pos = self._snap_to_pixel(scene_pos)
-            delta = snapped_pos - self.last_move_pos
-            self.moving_item.moveBy(delta.x(), delta.y())
-
-            curr_offset = self.moving_item.data(1) or QPointF(0, 0)
-            self.moving_item.setData(1, curr_offset + delta)
-
-            self.last_move_pos = snapped_pos
-            self.scene.update()
-            return  # 移动时不需要处理框选
-
-        # 如果正在拉新的框
-        if self.temp_rect:
-            curr_pos = self._snap_to_pixel(scene_pos)
-            rect = QRectF(self.start_point, curr_pos).normalized()
-            self.temp_rect.setRect(rect)
-
-    def handle_release(self, scene_pos, modifiers):
-        # --- 新增：释放移动状态 ---
-        if self.moving_item:
-            self.moving_item = None
-            return
-
-        if not self.active or not self.temp_rect:
-            return
-
-        new_rect = self.temp_rect.rect()
-        mode = self.temp_rect.data(0)
-        self.scene.removeItem(self.temp_rect)
-
-        if new_rect.width() > 2 and new_rect.height() > 2:
-            new_path = QPainterPath()
-            new_path.addRect(new_rect)
-            valid_items = self._get_valid_selections()
-            intersected = [s for s in valid_items if s.collidesWithItem(self.temp_rect)]
-
-            if mode == "remove":
-                for item in intersected:
-                    old_path = self._get_item_path(item)
-                    result_path = old_path.subtracted(new_path)
-                    if result_path.isEmpty():
-                        self._remove_item(item)
-                    else:
-                        self._update_item_shape(item, result_path)
-
-            elif modifiers & Qt.KeyboardModifier.ShiftModifier:
-                if intersected:
-                    base_item = intersected[0]
-                    combined_path = self._get_item_path(base_item)
-                    combined_path = combined_path.united(new_path)
-                    for i in range(1, len(intersected)):
-                        combined_path = combined_path.united(
-                            self._get_item_path(intersected[i])
-                        )
-                        self._remove_item(intersected[i])
-                    self._update_item_shape(base_item, combined_path)
-                else:
-                    self._create_new_rect(new_rect)
-            else:
-                self._create_new_rect(new_rect)
-
-        self.temp_rect = None
 
     def _get_valid_selections(self):
         valid = []
@@ -289,19 +144,18 @@ class SelectionManager:
         self.selections.append(item)
 
     def handle_double_click(self, scene_pos):
+        print(1)
         if not self.active:
             return
         valid_items = self._get_valid_selections()
         items = self.scene.items(scene_pos)
         clicked = [i for i in items if i in valid_items]
         if clicked:
+            print(2)
             self._remove_item(clicked[0])
         else:
             self.clear_selections()
-
-    # selection_manager.py
-
-    # selection_manager.py
+            print(3)
 
     def clear_selections(self, target_frame_data=None):
         """
@@ -627,61 +481,6 @@ class SelectionManager:
 
         return final_sorted
 
-    # def handle_key_nudge(self, key, is_boost=False):
-    #     """键盘位移：仅操作图元，不触发物理合并"""
-    #     if not self.active:
-    #         return
-
-    #     target = self.moving_item
-    #     if not target:
-    #         valid_selections = [s for s in self.selections if s.scene()]
-    #         if valid_selections:
-    #             target = valid_selections[-1]
-    #     if not target:
-    #         return
-
-    #     # 1. 只有第一次位移时，执行抠图 (Data 10 记录了原始区域)
-    #     if not hasattr(target, 'pix_overlay') or target.pix_overlay is None:
-    #         bg_item = next((i for i in self.scene.items()
-    #                        if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, 'is_clone')), None)
-    #         if bg_item:
-    #             scene_rect = target.sceneBoundingRect()
-    #             local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
-    #             local_rect = QRect(local_top_left, scene_rect.size().toSize())
-
-    #             target.setData(10, local_rect)
-    #             crop_pix = bg_item.pixmap().copy(local_rect)
-    #             self._permanently_erase_pixels(bg_item, local_rect) # 挖空底图
-
-    #             overlay = QGraphicsPixmapItem(crop_pix)
-    #             overlay.is_clone = True
-    #             overlay.setParentItem(target)
-    #             overlay.setZValue(-1)
-    #             overlay.setPos(target.boundingRect().topLeft())
-    #             target.pix_overlay = overlay
-
-    #     # 2. 执行物理位移 (dx, dy)
-    #     step = 10 if is_boost else 1
-    #     dx, dy = 0, 0
-    #     if key == Qt.Key_Left:
-    #         dx = -step
-    #     elif key == Qt.Key_Right:
-    #         dx = step
-    #     elif key == Qt.Key_Up:
-    #         dy = -step
-    #     elif key == Qt.Key_Down:
-    #         dy = step
-
-    #     target.moveBy(dx, dy)
-
-    #     # 3. 更新 Data(1) 累计位移量
-    #     curr_offset = target.data(1) or QPointF(0, 0)
-    #     target.setData(1, curr_offset + QPointF(dx, dy))
-
-    #     self.scene.update()
-    # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
-    # 不要在这里调用 _merge_back_to_bg
-
     def _get_valid_selections(self):
         """
         寻找场景中所有的选区框（兼容矩形和路径项）。
@@ -706,3 +505,71 @@ class SelectionManager:
         # 为了键盘操作能抓到“最新”的一个，我们按创建顺序倒序排列（selections 列表末尾是最新的）
         # 或者直接返回 self.selections 中仍然在场景里的项
         return [s for s in self.selections if s.scene()]
+
+    def abort_selection(self):
+        """【新增】强行中止选区工具，清理所有临时和正式选区"""
+        # 1. 清理正在拖拽的临时框
+        if self.temp_rect:
+            if self.temp_rect.scene() == self.scene:
+                self.scene.removeItem(self.temp_rect)
+            self.temp_rect = None
+
+        # 2. 清理所有已经画好的选区
+        self.clear_selections()
+
+        # 3. 重置状态位
+        self.start_point = None
+        self.active = False
+        self.moving_item = None
+
+    # selection_manager.py
+
+    def handle_mouse_press(self, event, scene_pos):
+        print("!!! HIT MANAGER PRESS !!!")
+        """由 ScalableView 转发过来，确保只接两个参数"""
+        # 强制清除之前的状态
+        if self.temp_rect:
+            if self.temp_rect.scene():
+                self.scene.removeItem(self.temp_rect)
+            self.temp_rect = None
+
+        self.start_point = scene_pos
+        self.active = True
+
+        if event.button() == Qt.LeftButton:
+            from PySide6.QtWidgets import QGraphicsRectItem
+
+            self.temp_rect = QGraphicsRectItem()
+            self.temp_rect.setPen(self.add_pen)
+            self.temp_rect.setBrush(self.add_color)
+            self.temp_rect.setZValue(1000)  # 置顶
+            self.scene.addItem(self.temp_rect)
+            # 这行如果没印出来，说明 ScalableView 根本没能成功调用到这个版本的函数
+            print(f"DEBUG: Manager received Press at {scene_pos}")
+
+    def handle_mouse_move(self, event, scene_pos):
+        if not self.active or self.start_point is None or self.temp_rect is None:
+            return
+
+        # 更新矩形大小
+        rect = QRectF(self.start_point, scene_pos).normalized()
+        self.temp_rect.setRect(rect)
+        # 强制刷新视图
+        self.scene.update()
+
+    def handle_mouse_release(self, event, scene_pos):
+        if not self.active or self.temp_rect is None:
+            return
+
+        final_rect = self.temp_rect.rect()
+        if final_rect.width() > 2 and final_rect.height() > 2:
+            self.selections.append(self.temp_rect)
+            print(f"DEBUG: Selection created: {final_rect}")
+            self.temp_rect = None
+        else:
+            if self.temp_rect.scene():
+                self.scene.removeItem(self.temp_rect)
+            self.temp_rect = None
+
+        self.active = False
+        self.start_point = None

@@ -8,15 +8,27 @@ from PySide6.QtGui import (
     QPixmap,
     QDragEnterEvent,
     QDropEvent,
-    QWheelEvent,
 )
+
 # from .selection_manager import SelectionManager
+# from .constants import ToolMode
 
 
 class ScalableView(QGraphicsView):
-    def __init__(self, scene):
+    def __init__(self, scene, parent_editor=None):
         super().__init__(scene)
+        self.editor = parent_editor
+        self.editor = parent_editor
 
+        # ... (之前的初始化代码保持不变) ...
+
+        # --- 关键修改 1：禁用默认的左键交互模式 ---
+        # 如果 DragMode 是 ScrollHandDrag，QGraphicsView 内部会吞掉 mousePressEvent 来处理平移
+        # 我们现在统一在过滤器里处理，所以这里设为 NoDrag
+        self.setDragMode(QGraphicsView.NoDrag)
+
+        # 确保视图能接收焦点，否则键盘过滤器可能失效
+        self.setFocusPolicy(Qt.StrongFocus)
         # self.selection_manager = SelectionManager(self.scene)
 
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -69,10 +81,6 @@ class ScalableView(QGraphicsView):
             target.display_image(path)
             event.acceptProposedAction()
 
-    def wheelEvent(self, event: QWheelEvent):
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        self.scale(factor, factor)
-
     # scalable_view.py
 
     def get_appropriate_cursor(self):
@@ -94,35 +102,23 @@ class ScalableView(QGraphicsView):
         self.viewport().setCursor(self.get_appropriate_cursor())
 
     def mousePressEvent(self, event):
-        # 1. 中键平移
-        if event.button() == Qt.MouseButton.MiddleButton:
+        """
+        注意：当你安装了 eventFilter 并在里面返回 True 时，这里的代码根本不会被执行。
+        但为了防止过滤器没捕捉到的情况，我们保留基本逻辑。
+        """
+        # 如果是中键，依然保留在 View 里处理（因为中键通常不涉及复杂的选区逻辑）
+        if event.button() == Qt.MiddleButton:
             self._is_panning = True
             self._last_mouse_pos = event.pos()
-            self.update_cursor_style()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
             return
 
-        # 2. 魔棒逻辑 (只有左键且魔棒开启时)
-        editor = self.parent()
-        while editor and not hasattr(editor, "btn_magic_wand"):
-            editor = editor.parent()
-        if editor and editor.btn_magic_wand.isChecked():
-            if event.button() == Qt.MouseButton.LeftButton:
-                local_pos = self.get_canvas_coordinates(event.pos())
-                if hasattr(editor, "handle_magic_wand_click"):
-                    editor.handle_magic_wand_click(local_pos)
-                return
-
-        # 3. 选取模式转发
-        if hasattr(self, "selection_manager") and self.selection_manager.active:
-            if event.button() == Qt.MouseButton.LeftButton:
-                scene_pos = self.mapToScene(event.pos())
-                self.selection_manager.handle_press(scene_pos, event.modifiers())
-                return
-
+        # 重要：如果是左键，且我们处于选区模式，由 eventFilter 接管，
+        # 这里什么都不要做，或者直接透传给父类。
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        # 1. 中键平移逻辑
         if self._is_panning:
             delta = event.pos() - self._last_mouse_pos
             self._last_mouse_pos = event.pos()
@@ -132,32 +128,26 @@ class ScalableView(QGraphicsView):
             self.verticalScrollBar().setValue(
                 self.verticalScrollBar().value() - delta.y()
             )
+            event.accept()
             return
 
-        # 2. 选取模式转发 (这里之前被我改废了，现在完全还原)
-        if hasattr(self, "selection_manager") and self.selection_manager.active:
-            scene_pos = self.mapToScene(event.pos())
-            self.selection_manager.handle_move(scene_pos)
-            return
-
+        # 模式分发交给 eventFilter 拦截，这里只做基础透传
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        # 1. 执行基类逻辑（确保 Qt 内部状态正确）
+        if event.button() == Qt.MiddleButton:
+            self._is_panning = False
+            self.update_cursor_style()
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
-        # 2. 中键平移结束
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._is_panning = False
-
-        # 3. 选取模式转发
-        if hasattr(self, "selection_manager") and self.selection_manager.active:
-            if event.button() == Qt.MouseButton.LeftButton:
-                scene_pos = self.mapToScene(event.pos())
-                self.selection_manager.handle_release(scene_pos, event.modifiers())
-
-        # 4. 【关键】无论发生了什么，最后根据状态机强制刷回十字或手掌
-        self.update_cursor_style()
+    def wheelEvent(self, event):
+        """缩放逻辑：通常作为全局功能，不随工具改变"""
+        # 保持你原有的缩放逻辑即可
+        # 记得在缩放结束后，可能需要触发 checker_item 的重绘缓存更新
+        super().wheelEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if hasattr(self, "selection_manager") and self.selection_manager.active:
