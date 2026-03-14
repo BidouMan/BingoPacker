@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QGraphicsView,
 )
-from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent
+from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
     QPixmap,
     QIcon,
@@ -25,7 +25,7 @@ from .selection_manager import SelectionManager
 from ...logic_slice import SliceLogic
 from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
-from .magic_wand import MagicWandTool
+from .magic_wand import MagicWandTool, SelectionAntsItem
 from .crop_tool import CropBoxItem
 from .constants import ToolMode
 
@@ -494,6 +494,7 @@ class ManualEditor(QWidget, EditorUI):
         勾选连续 (isChecked) -> 只选相连的一坨
         不勾选连续 -> 全图选所有颜色相近的点
         """
+
         # 1. 确定当前操作的图元
         target_item = (
             self.preview_item
@@ -537,109 +538,74 @@ class ManualEditor(QWidget, EditorUI):
         self.update_selection_display(selection_region)
 
     def update_selection_display(self, region):
-        """专业版：带安全生命周期管理的动态蚂蚁线"""
-
-        # 定义内部清理函数，防止代码重复
         def clear_ants():
             if hasattr(self, "ants_timer") and self.ants_timer:
                 self.ants_timer.stop()
-                self.ants_timer.deleteLater()
                 self.ants_timer = None
             if hasattr(self, "temp_mask_item") and self.temp_mask_item:
-                try:
+                if self.temp_mask_item.scene():
                     self.scene.removeItem(self.temp_mask_item)
-                except:  # noqa: E722
-                    pass
                 self.temp_mask_item = None
-                self.ants_layer = None
 
-        if region.isEmpty():
+        # 1. 如果传入空区域，直接清理并返回
+        if region is None or region.isEmpty():
             clear_ants()
             return
 
-        # 1. 路径处理
-        path = QPainterPath()
-        path.addRegion(region)
-        simplified_path = path.simplified()
-
-        # 2. 初始化或重置 Item
-        # 注意：如果已经报错了，我们强制重新创建
-        is_deleted = False
-        if hasattr(self, "ants_layer") and self.ants_layer:
-            try:
-                # 测试 C++ 对象是否还活着
-                _ = self.ants_layer.scene()
-            except RuntimeError:
-                is_deleted = True
-
-        if not hasattr(self, "temp_mask_item") or not self.temp_mask_item or is_deleted:
-            clear_ants()  # 确保旧的完全清理
-
-            from PySide6.QtWidgets import QGraphicsPathItem
-            from PySide6.QtCore import QTimer
-
-            self.temp_mask_item = QGraphicsPathItem()
-            self.ants_layer = QGraphicsPathItem(self.temp_mask_item)
+        # 2. 检查或创建 Item
+        if not hasattr(self, "temp_mask_item") or not self.temp_mask_item:
+            # 首次创建
+            self.temp_mask_item = SelectionAntsItem(region)
             self.scene.addItem(self.temp_mask_item)
 
-            self.ants_timer = QTimer(self)
-            self.ants_offset = 0
+            if not hasattr(self, "ants_timer") or self.ants_timer is None:
+                self.ants_timer = QTimer(self)
+                self.ants_timer.timeout.connect(self._animate_ants)
+                self.ants_timer.start(80)
+        else:
+            # 关键修复：点击新位置时，强制更新 Item 内部的 Region 数据
+            # 确保你的 SelectionAntsItem 类里有这个方法且调用了 self.update()
+            self.temp_mask_item.update_region(region)
 
-            def animate():
-                # 安全检查：如果对象被销毁了，立即停止定时器
-                try:
-                    if self.ants_layer:
-                        self.ants_offset = (self.ants_offset + 1) % 20
-                        p = self.ants_layer.pen()
-                        p.setDashOffset(self.ants_offset)
-                        self.ants_layer.setPen(p)
-                except (RuntimeError, AttributeError):
-                    if hasattr(self, "ants_timer") and self.ants_timer:
-                        self.ants_timer.stop()
-
-            self.ants_timer.timeout.connect(animate)
-            self.ants_timer.start(60)
-
-        # 3. 设置样式 (保持之前的 2 像素加粗)
-        line_width = 1
-        w_pen = QPen(QColor(255, 255, 255), line_width)
-        w_pen.setCosmetic(True)
-        self.temp_mask_item.setPath(simplified_path)
-        self.temp_mask_item.setPen(w_pen)
-
-        b_pen = QPen(QColor(0, 0, 0), line_width)
-        b_pen.setDashPattern([6, 6])
-        b_pen.setCosmetic(True)
-        self.ants_layer.setPath(simplified_path)
-        self.ants_layer.setPen(b_pen)
-
-        self.temp_mask_item.setZValue(9999)
-
-        # 4. 坐标同步
+        # 3. 坐标同步 (移出 else 分支，确保每次点击都重新对齐)
+        # 这解决了“点击新位置但不更新显示”或“位置错位”的问题
         target = (
             self.preview_item
             if (self.preview_item and self.preview_item.isVisible())
             else self.pixmap_item
         )
-        if target:
+        if target and self.temp_mask_item:
             self.temp_mask_item.setPos(target.pos())
             self.temp_mask_item.setTransform(target.transform())
+            # 强制重绘，确保新选区立即出现
+            self.temp_mask_item.update()
 
-    def on_magic_wand_toggled(self, checked):
-        """当魔棒按钮状态切换时触发"""
-        if hasattr(self, "magic_wand_panel"):
-            self.magic_wand_panel.setVisible(checked)
+    def _animate_ants(self):
+        if hasattr(self, "temp_mask_item") and self.temp_mask_item:
+            try:
+                # 只是改变偏移量并触发重绘
+                self.temp_mask_item.offset = (self.temp_mask_item.offset + 1) % 8
+                self.temp_mask_item.update()
+            except RuntimeError:
+                # 防止对象被意外删除导致的崩溃
+                if self.ants_timer:
+                    self.ants_timer.stop()
 
-        # 只需要让视图重绘光标即可，不需要手动 setDragMode 了
-        # 因为我们已经在视图内部通过状态机决定了鼠标样式
-        if checked:
-            # 互斥逻辑：开启魔棒时，关闭矩形选取模式
-            self.btn_pick.setChecked(False)
-            self.selection_manager.set_active(False)
+    # def on_magic_wand_toggled(self, checked):
+    #     """当魔棒按钮状态切换时触发"""
+    #     if hasattr(self, "magic_wand_panel"):
+    #         self.magic_wand_panel.setVisible(checked)
 
-        # 核心：通知视图根据最新状态更新光标
-        self.view.update_cursor_style()
-        print(f"DEBUG [Editor]: 魔棒模式切换为: {checked}")
+    #     # 只需要让视图重绘光标即可，不需要手动 setDragMode 了
+    #     # 因为我们已经在视图内部通过状态机决定了鼠标样式
+    #     if checked:
+    #         # 互斥逻辑：开启魔棒时，关闭矩形选取模式
+    #         self.btn_pick.setChecked(False)
+    #         self.selection_manager.set_active(False)
+
+    #     # 核心：通知视图根据最新状态更新光标
+    #     self.view.update_cursor_style()
+    #     print(f"DEBUG [Editor]: 魔棒模式切换为: {checked}")
 
     def deselect_all(self):
         """取消选择：同时清理魔棒选区和手动矩形选区"""
@@ -1037,7 +1003,7 @@ class ManualEditor(QWidget, EditorUI):
             if mode == ToolMode.MAGIC_WAND:
                 if event.type() == QEvent.MouseButtonPress:
                     self.handle_magic_wand_click(scene_pos)
-                    return True  # 拦截事件，不让 View 处理
+                    return True
 
             # 只在选区模式下接管鼠标
             if mode == ToolMode.RECT_SELECT:
@@ -1048,7 +1014,6 @@ class ManualEditor(QWidget, EditorUI):
 
                 # --- 处理双击清空 ---
                 elif event.type() == QEvent.MouseButtonDblClick:
-                    print("DEBUG Filter: Double Click detected")
                     scene_pos = self.view.mapToScene(event.pos())
                     self.selection_manager.handle_double_click(scene_pos)
                     return True
@@ -1125,6 +1090,9 @@ class ManualEditor(QWidget, EditorUI):
         # --- 第二阶段：更新模式 ---
         self.current_tool_mode = mode
         print(f"Tool changed to: {mode}")
+
+        # is_wand = mode == ToolMode.MAGIC_WAND
+        # self.magic_wand_panel.setVisible(is_wand)
 
         # --- 第三阶段：初始化新工具 (Activate) ---
         self._activate_new_tool(mode)
