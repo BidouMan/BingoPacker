@@ -57,13 +57,13 @@ class CropHandle(QGraphicsRectItem):
         return super().itemChange(change, value)
 
 
-# crop_tool.py
-
-
 class CropBoxItem(QGraphicsRectItem):
     def __init__(self, initial_rect, parent_item=None):
         super().__init__(initial_rect, parent_item)
-        self.setPen(QPen(QColor("#61afef"), 1, Qt.PenStyle.SolidLine))
+        pen = QPen(QColor("#61afef"), 1.5)  # 1.5 像素宽，蓝白色
+        pen.setCosmetic(True)  # 关键：让线宽不随缩放改变
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)  # 让拐角尖锐
+        self.setPen(pen)
         self.setZValue(1000)
 
         self.handles = {}
