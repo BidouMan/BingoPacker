@@ -104,7 +104,7 @@ class EditorUI:
         toolbar_layout.addWidget(self.btn_cut)
 
         # --- 插入弹簧实现右对齐 ---
-        toolbar_layout.addStretch()
+        # toolbar_layout.addStretch()
 
         # --- 魔棒工具选项面板 ---
         self.magic_wand_panel = QWidget()
@@ -138,6 +138,7 @@ class EditorUI:
         mw_layout.addWidget(self.btn_expand)
         mw_layout.addWidget(self.btn_shrink)
         mw_layout.addWidget(self.btn_invert)
+        mw_layout.addStretch()
 
         toolbar_layout.addWidget(self.magic_wand_panel)
         layout.addWidget(self.toolbar)
@@ -160,19 +161,20 @@ class EditorUI:
         # --- 内容区重构 ---
         content_layout = QHBoxLayout()
         # 左侧列表保持原样...
-        content_layout.addWidget(self.frame_list)
+        # content_layout.addWidget(self.frame_list)
 
         # 2. 右侧垂直容器
         right_main_layout = QVBoxLayout()
         right_main_layout.setSpacing(0)
         right_main_layout.setContentsMargins(0, 0, 0, 0)
 
+        content_layout.addWidget(self.frame_list, 0)
         # 3. 画布布局
         self.canvas_layout = QVBoxLayout()
         self.canvas_layout.setSpacing(0)
         self.canvas_layout.setContentsMargins(0, 0, 0, 0)
         right_main_layout.addLayout(self.canvas_layout)
-
+        content_layout.addLayout(self.canvas_layout, 1)
         # 4. 底部状态栏容器 (解决黑线的关键样式)
         self.status_bar = QFrame()
         self.status_bar.setFixedHeight(26)

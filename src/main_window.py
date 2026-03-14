@@ -28,8 +28,7 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
     def init_ui(self):
         self.setWindowTitle("Bingo Sprite Packer")
         # 考虑到常驻预览面板 (280px)，主窗口总宽度设为 1040 (760+280)
-        self.setFixedWidth(1040)
-        self.setFixedHeight(620)
+        self.setMinimumSize(1040, 620)
 
         # --- One Dark 风格配色方案 ---
         # 背景: #282c34 | 容器: #21252b | 边框: #3e4451
@@ -78,7 +77,7 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
 
         # --- 左侧主区 ---
         self.main_container = QWidget()
-        self.main_container.setFixedWidth(760)
+        # self.main_container.setFixedWidth(760)
         main_layout = QVBoxLayout(self.main_container)
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
@@ -112,11 +111,13 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
 
         self.setup_bottom_buttons(main_layout)
         self.global_layout.addWidget(self.main_container)
+        self.global_layout.addWidget(self.main_container, stretch=1)
 
         # --- 右侧预览区 (常驻) ---
         self.preview_panel = PreviewPanel()
         self.preview_panel.setVisible(True)
-        self.global_layout.addWidget(self.preview_panel)
+        self.preview_panel.setFixedWidth(280)
+        self.global_layout.addWidget(self.preview_panel, stretch=0)
 
     def setup_bottom_buttons(self, layout):
         btn_layout = QHBoxLayout()
