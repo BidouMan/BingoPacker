@@ -3,10 +3,11 @@ import re
 import json
 import zipfile
 from PySide6.QtGui import QPixmap
-from PySide6.QtCore import QRect
+
 
 # 这里的导入根据你的项目结构微调，建议使用绝对导入
 from .asset_model import AssetBundle, FrameData
+
 
 class AssetManager:
     _instance = None
@@ -30,7 +31,7 @@ class AssetManager:
             unique_name = self.get_unique_name(bundle.name)
             if unique_name != bundle.name:
                 bundle.name = unique_name
-        
+
         self._storage[bundle.name] = bundle
         return bundle.name
 
@@ -54,7 +55,7 @@ class AssetManager:
     def clear_all(self):
         """全量清空"""
         self._storage.clear()
-    
+
     def remove_asset(self, name):
         """从仓库中移除特定的资源项"""
         if name in self._storage:
@@ -73,7 +74,7 @@ class AssetManager:
         if not os.path.exists(file_path):
             print(f"ERROR: 文件不存在: {file_path}")
             return None
-            
+
         ext = os.path.splitext(file_path)[1].lower()
         try:
             if ext == ".bgs":
@@ -96,13 +97,17 @@ class AssetManager:
         folder_name = os.path.basename(folder_path.rstrip(os.sep))
         bundle = AssetBundle(folder_name)
         bundle.path = folder_path
-        bundle.is_memory = False 
+        bundle.is_memory = False
 
-        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+        valid_exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
         files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-        
+
         # 自然排序逻辑
-        files.sort(key=lambda x: [int(c) if c.isdigit() else c for c in re.split('([0-9]+)', x)])
+        files.sort(
+            key=lambda x: [
+                int(c) if c.isdigit() else c for c in re.split("([0-9]+)", x)
+            ]
+        )
 
         if not files:
             return None
@@ -112,42 +117,51 @@ class AssetManager:
             pix = QPixmap(full_path)
             if not pix.isNull():
                 bundle.frames.append(FrameData(pix, pix.rect(), f_name))
-        
+
         if bundle.frames:
-            bundle.segments = [{"name": "All Frames", "start": 1, "end": len(bundle.frames)}]
-        
+            bundle.segments = [
+                {"name": "All Frames", "start": 1, "end": len(bundle.frames)}
+            ]
+
         return bundle
 
-    def create_bundle_from_memory(self, name, pixmap_list, frame_names=None, original_pix=None):
+    def create_bundle_from_memory(
+        self, name, pixmap_list, frame_names=None, original_pix=None
+    ):
         """
         适配器：处理内存数据（如裁切后的结果或编辑器生成的数据）
         """
         bundle = AssetBundle(name)
         bundle.is_memory = True
         bundle.original_pixmap = original_pix
-        
+
         for i, pix in enumerate(pixmap_list):
-            f_name = frame_names[i] if frame_names and i < len(frame_names) else f"{name}_{i:02d}"
+            f_name = (
+                frame_names[i]
+                if frame_names and i < len(frame_names)
+                else f"{name}_{i:02d}"
+            )
             bundle.frames.append(FrameData(pix, pix.rect(), f_name))
-        
+
         bundle.segments = [{"name": "Sequence", "start": 1, "end": len(bundle.frames)}]
         return bundle
 
     def load_asset(self, path):
         """统一入口：根据后缀名决定解析方式"""
-        if not os.path.exists(path): return None
-        
+        if not os.path.exists(path):
+            return None
+
         ext = os.path.splitext(path)[1].lower()
         try:
-            if ext == '.bgs':
+            if ext == ".bgs":
                 bundle = self._parse_bgs(path)
-            elif ext == '.sprite3':
+            elif ext == ".sprite3":
                 bundle = self._parse_sprite3(path)
-            elif ext in ['.png', '.jpg', '.jpeg']:
+            elif ext in [".png", ".jpg", ".jpeg"]:
                 bundle = self._parse_single_image(path)
             else:
                 return None
-            
+
             # 注册到管理仓库中，确保名字唯一
             if bundle:
                 self.register_asset(bundle)
@@ -160,69 +174,71 @@ class AssetManager:
 
     def _parse_bgs(self, path):
         """解析导出的 .bgs 工程文件 (ZIP格式)"""
-        with zipfile.ZipFile(path, 'r') as z:
+        with zipfile.ZipFile(path, "r") as z:
             # 1. 读取配置文件
-            if 'config.json' not in z.namelist():
+            if "config.json" not in z.namelist():
                 raise Exception("无效的 .bgs 文件：缺少 config.json")
-                
-            with z.open('config.json') as f:
-                data = json.loads(f.read().decode('utf-8'))
-            
+
+            with z.open("config.json") as f:
+                data = json.loads(f.read().decode("utf-8"))
+
             # 2. 初始化 Bundle
-            bundle = AssetBundle(data['name'])
+            bundle = AssetBundle(data["name"])
             bundle.path = path
-            bundle.is_memory = False # 标记为磁盘导入
-            
+            bundle.is_memory = False  # 标记为磁盘导入
+
             # 3. 按顺序还原帧数据 (必须对应 frames 列表中的顺序)
-            for f_name in data.get('frames', []):
+            for f_name in data.get("frames", []):
                 if f_name in z.namelist():
                     img_data = z.read(f_name)
                     pix = QPixmap()
                     pix.loadFromData(img_data)
                     # 还原帧模型，这里 rect 可以设为 pix.rect()，因为导出时已经是裁切好的
                     bundle.frames.append(FrameData(pix, pix.rect(), f_name))
-            
+
             # 4. 还原片段定义
-            bundle.segments = data.get('segments', [])
-            
+            bundle.segments = data.get("segments", [])
+
             return bundle
 
     def _parse_sprite3(self, path):
         """处理 Scratch 的 .sprite3 压缩包"""
-        with zipfile.ZipFile(path, 'r') as z:
-            with z.open('sprite.json') as f:
-                content = f.read().decode('utf-8')
+        with zipfile.ZipFile(path, "r") as z:
+            with z.open("sprite.json") as f:
+                content = f.read().decode("utf-8")
                 data = json.loads(content)
-                
-                bundle = AssetBundle(data['name'])
+
+                bundle = AssetBundle(data["name"])
                 bundle.path = path
-                
-                for cos in data.get('costumes', []):
-                    img_data = z.read(cos['md5ext'])
+
+                for cos in data.get("costumes", []):
+                    img_data = z.read(cos["md5ext"])
                     pix = QPixmap()
                     pix.loadFromData(img_data)
-                    bundle.frames.append(FrameData(pix, pix.rect(), cos['name']))
-                
+                    bundle.frames.append(FrameData(pix, pix.rect(), cos["name"]))
+
                 # sprite3 默认没片段，创建一个全集的
-                bundle.segments = [{"name": "Default", "start": 1, "end": len(bundle.frames)}]
+                bundle.segments = [
+                    {"name": "Default", "start": 1, "end": len(bundle.frames)}
+                ]
                 return bundle
 
     def _parse_single_image(self, path):
         """处理单张散图导入 (场景B的核心入口)"""
         file_name = os.path.basename(path)
         name_without_ext = os.path.splitext(file_name)[0]
-        
+
         bundle = AssetBundle(name_without_ext)
         bundle.path = path
         bundle.is_memory = False
-        
+
         pix = QPixmap(path)
         if pix.isNull():
             raise Exception("图片损坏")
-            
+
         # 封装为标准一帧
         frame = FrameData(pix, pix.rect(), file_name)
         bundle.frames.append(frame)
         bundle.segments = [{"name": "Default", "start": 1, "end": 1}]
-        
+
         return bundle

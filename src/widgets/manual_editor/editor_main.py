@@ -404,14 +404,71 @@ class ManualEditor(QWidget, EditorUI):
         self.view.update()
 
     def on_save_clicked(self):
-        """保存逻辑：集成 SliceLogic"""
-        if not self.current_frames:
+        """保存按钮：精准抓取像素，排除棋盘格"""
+        if not self.current_bundle or not self.preview_item:
             return
-        pixmaps = [f["pixmap"] for f in self.current_frames]
-        save_dir = self.slice_logic.save_sliced_sprites(
-            self.current_source_path, pixmaps
-        )
-        print(f"已保存至: {save_dir}")
+
+        curr_idx = self.frame_list.currentRow()
+        if curr_idx == -1:
+            return
+        frame_data = self.current_bundle.frames[curr_idx]
+
+        # 1. 准备画布
+        rect = self.preview_item.pixmap().rect()
+        final_pixmap = QPixmap(rect.size())
+        # 关键：填充完全透明，确保没有背景色
+        final_pixmap.fill(Qt.transparent)
+
+        painter = QPainter(final_pixmap)
+
+        # 2. 【核心修复】：手动控制绘制顺序，避开棋盘格
+        # 第一步：画底图 (self.preview_item)
+        painter.drawPixmap(0, 0, self.preview_item.pixmap())
+
+        # 第二步：画悬浮选区 (如果有的话)
+        if hasattr(self, "selection_manager"):
+            for item in self.selection_manager.selections:
+                if hasattr(item, "pix_overlay") and item.pix_overlay:
+                    # 计算悬浮层相对于底图左上角的偏移量
+                    # 场景坐标 - 底图场景坐标 = 相对坐标
+                    offset = item.pix_overlay.scenePos() - self.preview_item.scenePos()
+                    painter.drawPixmap(offset.toPoint(), item.pix_overlay.pixmap())
+
+        painter.end()
+
+        # 3. 更新内存并写盘
+        frame_data.pixmap = final_pixmap
+        self._execute_final_physical_save()
+
+        # 4. 清理 UI 选区并同步
+        if hasattr(self, "selection_manager"):
+            self.selection_manager.clear_selections()
+
+        self.sync_and_notify()
+
+    def _execute_final_physical_save(self):
+        """物理写入磁盘逻辑"""
+        bundle = self.current_bundle
+        if not bundle.path:
+            return
+
+        try:
+            # 单帧模式：直接覆盖
+            if len(bundle.frames) == 1:
+                bundle.frames[0].pixmap.save(bundle.path, "PNG")
+                print(f"DEBUG [Save]: 单帧原图已物理覆盖: {bundle.path}")
+            else:
+                # 多帧模式：创建同名文件夹
+                parent_dir = os.path.dirname(bundle.path)
+                target_folder = os.path.join(parent_dir, bundle.name)
+                os.makedirs(target_folder, exist_ok=True)
+
+                for i, f in enumerate(bundle.frames):
+                    save_path = os.path.join(target_folder, f"frame_{i:03d}.png")
+                    f.pixmap.save(save_path, "PNG")
+                print(f"DEBUG [Save]: 序列帧已更新至目录: {target_folder}")
+        except Exception as e:
+            print(f"DEBUG [Save]: 磁盘保存崩溃: {e}")
 
     def clear_all(self):
         """完全清空编辑器状态并重置全局环境"""
@@ -891,34 +948,29 @@ class ManualEditor(QWidget, EditorUI):
         return super().eventFilter(source, event)
 
     def sync_and_notify(self):
-        """核心：强制将编辑器内的 Pixmap 覆盖到 Bundle 模型对象中"""
-        if not self.current_bundle or not self.current_frames:
+        """这个函数是全程序的刷新总闸"""
+        if not self.current_bundle:
             return
 
-        # 1. 物理同步：遍历编辑器里的帧，强行覆盖 Bundle 里的 FrameData 对象
-        for i, frame_info in enumerate(self.current_frames):
-            # frame_info 是编辑器里的字典 {"pixmap": pix, "item": item}
-            if i < len(self.current_bundle.frames):
-                # 获取底层的 FrameData 实例
-                target_frame_obj = self.current_bundle.frames[i]
-                # 关键：更新该对象的 pixmap 引用
-                target_frame_obj.pixmap = frame_info["pixmap"]
+        # 1. 强制发射信号，带上最新的数据
+        # 只要这一行执行了，你的右侧预览面板、动画播放就一定会变
+        self.bundle_updated.emit(self.current_bundle, {})
 
-                # 可选：同步更新列表左侧的缩略图 (Icon)
-                list_item = self.frame_list.item(i)
-                if list_item:
-                    icon_pix = frame_info["pixmap"].scaled(
-                        45, 45, Qt.AspectRatioMode.KeepAspectRatio
-                    )
-                    list_item.setIcon(QIcon(icon_pix))
+        # 2. 刷新左侧列表的图标
+        curr_idx = self.frame_list.currentRow()
+        if 0 <= curr_idx < len(self.current_bundle.frames):
+            f_data = self.current_bundle.frames[curr_idx]
+            pix = f_data.pixmap if hasattr(f_data, "pixmap") else f_data.get("pixmap")
+            if pix:
+                icon_pix = pix.scaled(
+                    48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                item = self.frame_list.item(curr_idx)
+                if item:
+                    item.setIcon(QIcon(icon_pix))
 
-        # 2. 信号通知：确保预览面板收到两个参数
-        curr_seg = getattr(self, "current_segment", {})
-        # 兼容处理：如果 curr_seg 为空，构造一个临时的
-        if not curr_seg and len(self.current_bundle.frames) > 0:
-            curr_seg = {"start": 1, "end": len(self.current_bundle.frames)}
-
-        self.bundle_updated.emit(self.current_bundle, curr_seg)
+        self.view.update()
+        print("DEBUG [Sync]: UI 已全局刷新")
 
     # -----------------------------------------------------------------
     # 在 editor_main.py 的 ManualEditor 类中添加
