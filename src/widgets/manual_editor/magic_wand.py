@@ -1,8 +1,8 @@
 import numpy as np
 import cv2
 from PySide6.QtWidgets import QGraphicsItem
-from PySide6.QtCore import QTimer, Qt, QRectF, QRect, QPoint
-from PySide6.QtGui import QPen, QPainterPath, QImage, QRegion, QPainter, QPolygon
+from PySide6.QtCore import Qt, QRectF, QRect
+from PySide6.QtGui import QPen, QPainterPath, QImage, QRegion, QPainter
 
 
 class MagicWandTool:

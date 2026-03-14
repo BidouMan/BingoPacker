@@ -11,9 +11,6 @@ from PySide6.QtGui import (
     QPixmap,
     QIcon,
     QPainter,
-    QPainterPath,
-    QColor,
-    QPen,
     QRegion,
     QShortcut,
     QKeySequence,
@@ -727,109 +724,6 @@ class ManualEditor(QWidget, EditorUI):
             )
             self.update_selection_display(self.selection_mask)
 
-    def on_cut_mode_toggled(self, checked):
-        if checked:
-            # 进入裁切模式
-            self.view.setDragMode(
-                QGraphicsView.NoDrag
-            )  # 禁用视图平移，让鼠标处理裁切框
-            self.start_crop_session()
-        else:
-            # 退出裁切模式
-            self.finish_crop_session()
-
-    def start_crop_session(self):
-        """进入裁切模式"""
-        # 1. 核心修复：检查 pixmap_item 是否存在且是否有图片
-        if not hasattr(self, "pixmap_item") or self.pixmap_item is None:
-            print("DEBUG: 画布为空，无法启动裁切")
-            # 强行把按钮弹回去
-            self.btn_cut.blockSignals(True)
-            self.btn_cut.setChecked(False)
-            self.btn_cut.blockSignals(False)
-            return
-
-        target_item = self.pixmap_item
-        if not target_item.pixmap() or target_item.pixmap().isNull():
-            return
-
-        # 2. 正常启动逻辑
-        image_rect = target_item.boundingRect()
-        # 传入当前场景范围和初始矩形
-        self.crop_box = CropBoxItem(self.scene.sceneRect(), image_rect)
-        self.scene.addItem(self.crop_box)
-
-        self.view.setDragMode(ScalableView.NoDrag)
-
-    def finish_crop_session(self):
-        """应用裁切逻辑并退出"""
-        # 1. 变量存在性检查
-        if not hasattr(self, "crop_box") or self.crop_box is None:
-            return
-
-        try:
-            # 2. 检查内部 C++ 对象是否还活着
-            # 如果 scene() 返回 None 或抛出 RuntimeError，说明对象已销毁
-            if not self.crop_box.scene():
-                self.crop_box = None
-                return
-
-            self.save_undo_state()  # 存档
-
-            crop_rect = self.crop_box.rect().normalized().toRect()
-
-            # ... (中间的裁切逻辑保持不变) ...
-            original_pixmap = self.pixmap_item.pixmap()
-            if not original_pixmap.isNull():
-                new_pixmap = QPixmap(crop_rect.width(), crop_rect.height())
-                new_pixmap.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(new_pixmap)
-                target_pos = QPoint(-crop_rect.x(), -crop_rect.y())
-                painter.drawPixmap(target_pos, original_pixmap)
-                painter.end()
-                self.pixmap_item.setPixmap(new_pixmap)
-                self.pixmap_item.setPos(0, 0)
-                new_rect = QRectF(0, 0, new_pixmap.width(), new_pixmap.height())
-                self.scene.setSceneRect(new_rect)
-                if hasattr(self.view, "checker_item") and self.view.checker_item:
-                    self.view.checker_item.set_rect(new_rect)
-
-        except RuntimeError:
-            # 捕获 "Internal C++ object already deleted"
-            pass
-        finally:
-            # 3. 彻底清理引用
-            if hasattr(self, "crop_box") and self.crop_box:
-                # 再次检查 scene 确保可以安全 remove
-                try:
-                    if self.crop_box.scene():
-                        self.scene.removeItem(self.crop_box)
-                except RuntimeError:
-                    pass
-                self.crop_box = None
-
-            # 4. 恢复 UI 状态
-            # 暂时阻塞信号，防止按钮状态改变再次触发此函数导致死循环
-            self.btn_cut.blockSignals(True)
-            self.btn_cut.setChecked(False)
-            self.btn_cut.blockSignals(False)
-            self.view.setDragMode(ScalableView.ScrollHandDrag)
-
-    def abort_crop_session(self):
-        """完全放弃裁切，不保存任何改动并清理 UI"""
-        if hasattr(self, "crop_box") and self.crop_box:
-            try:
-                if self.crop_box.scene():
-                    self.scene.removeItem(self.crop_box)
-            except RuntimeError:
-                pass
-            self.crop_box = None
-
-        self.btn_cut.blockSignals(True)
-        self.btn_cut.setChecked(False)
-        self.btn_cut.blockSignals(False)
-        self.view.setDragMode(ScalableView.ScrollHandDrag)
-
     def save_undo_state(self):
         """在任何修改操作（裁切、魔棒删除等）之前调用"""
         if not hasattr(self, "pixmap_item") or self.pixmap_item is None:
@@ -965,6 +859,19 @@ class ManualEditor(QWidget, EditorUI):
             event.accept()
             return
 
+        # --- 核心：裁切工具的键盘监听 ---
+        if self.current_tool_mode == ToolMode.CROP:
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                print("DEBUG [Editor]: 键盘回车触发裁切")
+                self.apply_crop()
+                event.accept()
+                return
+            elif key == Qt.Key_Escape:
+                print("DEBUG [Editor]: ESC 取消裁切")
+                self.set_tool_mode(ToolMode.IDLE)
+                event.accept()
+                return
+
         # 3. 裁切模式
         if hasattr(self, "crop_box") and self.crop_box:
             # ... 保持原样 ...
@@ -1021,6 +928,21 @@ class ManualEditor(QWidget, EditorUI):
                 elif event.type() == QEvent.MouseButtonRelease:
                     self.selection_manager.handle_mouse_release(event, scene_pos)
                     return True
+            if mode == ToolMode.CROP:
+                # 只有双击时我们才主动拦截并执行 apply_crop
+                # 正常的拖拽手柄逻辑由 CropBoxItem 内部的 mousePress/Move 实现
+                # 因为它们是 QGraphicsItem，Scene 会自动分发事件给它们
+                if event.type() == QEvent.MouseButtonDblClick:
+                    # 如果双击的是裁切框内部，则确认裁切
+                    if hasattr(self, "crop_box") and self.crop_box:
+                        # 将场景坐标转为裁切框本地坐标判断是否点在框内
+                        local_pos = self.crop_box.mapFromScene(scene_pos)
+                        if self.crop_box.rect().contains(local_pos):
+                            print("DEBUG [Filter]: 双击确认裁切")
+                            self.apply_crop()
+                            return True
+                # 其他鼠标事件返回 False，让 Scene 正常传递给 CropBoxItem 的手柄
+                return False
 
         # --- 2. 处理键盘事件 (你原有的逻辑) ---
         if event.type() == QEvent.KeyPress:
@@ -1072,6 +994,48 @@ class ManualEditor(QWidget, EditorUI):
         print(f"DEBUG: [Sync Success] {self.current_bundle.name} 数据已入库")
 
     # -----------------------------------------------------------------
+    # 在 editor_main.py 的 ManualEditor 类中添加
+    def get_active_pixmap_item(self):
+        """统一获取当前操作的目标图元"""
+        if (
+            hasattr(self, "preview_item")
+            and self.preview_item
+            and self.preview_item.isVisible()
+        ):
+            return self.preview_item
+        return getattr(self, "pixmap_item", None)
+
+    def apply_crop(self):
+        """确认裁切：从工具拿结果并更新"""
+        if not hasattr(self, "crop_box") or not self.crop_box:
+            return
+
+        # 1. 向工具请求切割后的图像
+        new_pixmap = self.crop_box.get_cropped_pixmap()
+        if not new_pixmap or new_pixmap.isNull():
+            return
+
+        # 2. 存档并更新 UI
+        self.save_undo_state()
+        target_item = self.get_active_pixmap_item()
+        target_item.setPixmap(new_pixmap)
+        target_item.setPos(0, 0)
+
+        # 3. 场景适配 (棋盘格和背景)
+        new_rect = QRectF(0, 0, new_pixmap.width(), new_pixmap.height())
+        self.scene.setSceneRect(new_rect)
+        if hasattr(self.view, "checker_item"):
+            self.view.checker_item.set_rect(new_rect)
+
+        # 4. 同步数据到 Bundle（如果是底图的话）
+        if target_item == getattr(self, "pixmap_item", None):
+            if self.current_bundle:
+                self.current_bundle.original_pixmap = new_pixmap
+                if self.current_bundle.frames:
+                    self.current_bundle.frames[0].pixmap = new_pixmap
+
+        # 5. 退出模式
+        self.set_tool_mode(ToolMode.IDLE)
 
     def set_tool_mode(self, mode):
         """
@@ -1116,3 +1080,18 @@ class ManualEditor(QWidget, EditorUI):
             self.view.setDragMode(QGraphicsView.NoDrag)
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.selection_manager.active = True
+
+        elif mode == ToolMode.CROP:
+            target = self.get_active_pixmap_item()
+            if not target or not target.pixmap() or target.pixmap().isNull():
+                print("DEBUG [Editor]: 无效底图，无法开启裁切")
+                self.set_tool_mode(ToolMode.IDLE)
+                return
+
+            # 1. 搬家后的写法：直接将裁切框设为底图的子项 (parent_item=target)
+            # 初始矩形直接使用底图的范围
+            self.crop_box = CropBoxItem(target.boundingRect(), parent_item=target)
+
+            # 2. 视觉配置
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            print(f"DEBUG [Editor]: 裁切模式已激活，绑定到底图 {target}")
