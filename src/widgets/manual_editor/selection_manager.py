@@ -185,20 +185,21 @@ class SelectionManager:
                 self.temp_rect = None
 
     def clear_selections(self, target_frame_data=None):
+        """修复 3：清空时必须处理未焊回的像素"""
         if not self.selections:
             return
 
         for item in self.selections[:]:
-            # 如果你希望双击空白是【取消】而不是【合并】，请注释掉下面这行
-            # self._merge_back_to_bg(item, target_frame_data=target_frame_data)
+            # --- 关键：如果该选区已经抠了图，先焊回去再删 ---
+            if hasattr(item, "pix_overlay") and item.pix_overlay:
+                # 调用你已有的合并函数，把像素贴回底图的新位置
+                self._merge_back_to_bg(item, target_frame_data=target_frame_data)
 
             if item.scene():
                 self.scene.removeItem(item)
 
         self.selections.clear()
         self.moving_item = None
-        # 保持 active 状态，除非你想让工具直接退出
-        # self.active = False
 
     def _apply_transparent_holes(self, bg_item):
         """
@@ -277,41 +278,24 @@ class SelectionManager:
         if not self.active:
             return
 
+        # 1. 确定操作对象
         target = self.moving_item
         if not target:
             valid_selections = [s for s in self.selections if s.scene()]
             if valid_selections:
                 target = valid_selections[-1]
+                # --- 细节：锁定移动目标，防止切换 ---
+                self.moving_item = target
+
         if not target:
             return
 
-        # 1. 只有第一次位移时，执行抠图 (Data 10 记录了原始区域)
+        # 2. 【核心修改】确保像素被抠出
+        # 注意：_prepare_moving_pixels 内部必须处理好 bg_item 的查找
         if not hasattr(target, "pix_overlay") or target.pix_overlay is None:
-            bg_item = next(
-                (
-                    i
-                    for i in self.scene.items()
-                    if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, "is_clone")
-                ),
-                None,
-            )
-            if bg_item:
-                scene_rect = target.sceneBoundingRect()
-                local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
-                local_rect = QRect(local_top_left, scene_rect.size().toSize())
+            self._prepare_moving_pixels(target)
 
-                target.setData(10, local_rect)
-                crop_pix = bg_item.pixmap().copy(local_rect)
-                self._permanently_erase_pixels(bg_item, local_rect)  # 挖空底图
-
-                overlay = QGraphicsPixmapItem(crop_pix)
-                overlay.is_clone = True
-                overlay.setParentItem(target)
-                overlay.setZValue(-1)
-                overlay.setPos(target.boundingRect().topLeft())
-                target.pix_overlay = overlay
-
-        # 2. 执行物理位移 (dx, dy)
+        # 3. 计算步长
         step = 10 if is_boost else 1
         dx, dy = 0, 0
         if key == Qt.Key_Left:
@@ -323,12 +307,14 @@ class SelectionManager:
         elif key == Qt.Key_Down:
             dy = step
 
+        # 4. 执行位移
         target.moveBy(dx, dy)
 
-        # 3. 更新 Data(1) 累计位移量
+        # 5. 更新 Data(1) 累计位移量 (这对后续焊死/撤销逻辑很重要)
         curr_offset = target.data(1) or QPointF(0, 0)
         target.setData(1, curr_offset + QPointF(dx, dy))
 
+        # 6. 强制刷新，解决部分机器上的残影问题
         self.scene.update()
         # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
 
@@ -589,15 +575,15 @@ class SelectionManager:
             self.temp_rect.setZValue(1000)
             self.scene.addItem(self.temp_rect)
 
-    def handle_mouse_move(self, event, scene_pos):
-        if not self.active or self.start_point is None or self.temp_rect is None:
-            return
+    # def handle_mouse_move(self, event, scene_pos):
+    #     if not self.active or self.start_point is None or self.temp_rect is None:
+    #         return
 
-        # 更新矩形大小
-        rect = QRectF(self.start_point, scene_pos).normalized()
-        self.temp_rect.setRect(rect)
-        # 强制刷新视图
-        self.scene.update()
+    #     # 更新矩形大小
+    #     rect = QRectF(self.start_point, scene_pos).normalized()
+    #     self.temp_rect.setRect(rect)
+    #     # 强制刷新视图
+    #     self.scene.update()
 
     def handle_mouse_release(self, event, scene_pos):
         if self.temp_rect is None:
@@ -649,3 +635,105 @@ class SelectionManager:
             self.temp_rect = None
 
         self.start_point = None
+
+    # selection_manager.py 内部
+
+    def _prepare_moving_pixels(self, target_item):
+        """将选区内的像素抠出来，变成可移动的贴层，并挖空底图"""
+        bg_item = next(
+            (
+                i
+                for i in self.scene.items()
+                if isinstance(i, QGraphicsPixmapItem)
+                and not hasattr(i, "is_clone")
+                and i.isVisible()
+            ),
+            None,
+        )
+        if not bg_item:
+            return
+
+        # 1. 取得选区在场景中的对齐矩形
+        if isinstance(target_item, QGraphicsRectItem):
+            scene_rect = (
+                target_item.mapToScene(target_item.rect())
+                .boundingRect()
+                .toAlignedRect()
+            )
+        else:
+            scene_rect = target_item.sceneBoundingRect().toAlignedRect()
+
+        # 2. 映射到底图局部并抠图
+        local_pos = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
+        local_rect = QRect(local_pos, scene_rect.size())
+        target_item.setData(10, local_rect)
+
+        crop_pix = bg_item.pixmap().copy(local_rect)
+        self._permanently_erase_pixels(bg_item, local_rect)
+
+        # 3. 创建贴层并配置层级
+        overlay = QGraphicsPixmapItem(crop_pix)
+        overlay.is_clone = True
+        overlay.setParentItem(target_item)
+
+        # --- 核心修复开始 ---
+        # 标记子物体强制在父物体（选框）之后（即下方）绘制
+        from PySide6.QtWidgets import QGraphicsItem
+
+        overlay.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
+
+        # 双重保险：设置 ZValue 为负
+        overlay.setZValue(-1)
+        # 确保父物体（选框）Z值足够高
+        target_item.setZValue(2000)
+        # --- 核心修复结束 ---
+
+        overlay.setTransformationMode(Qt.FastTransformation)
+
+        if isinstance(target_item, QGraphicsRectItem):
+            overlay.setPos(target_item.rect().topLeft())
+        else:
+            overlay.setPos(target_item.boundingRect().topLeft())
+
+        target_item.pix_overlay = overlay
+
+    def handle_mouse_move(self, event, scene_pos):
+        if not self.active or self.start_point is None:
+            return
+
+        is_left_button = bool(event.buttons() & Qt.LeftButton)
+        modifiers = event.modifiers()
+        is_move_cmd = bool(modifiers & (Qt.ControlModifier | Qt.MetaModifier))
+
+        # --- 情况 A: 移动模式 (Command + 鼠标左键拖拽) ---
+        if is_left_button and is_move_cmd and self.moving_item:
+            if self.last_move_pos is not None:
+                if (
+                    not hasattr(self.moving_item, "pix_overlay")
+                    or self.moving_item.pix_overlay is None
+                ):
+                    self._prepare_moving_pixels(self.moving_item)
+
+                # 核心：计算鼠标在场景中移动的绝对像素差
+                delta = scene_pos - self.last_move_pos
+                dx, dy = round(delta.x()), round(delta.y())
+
+                if dx != 0 or dy != 0:
+                    # 直接移动父物体，子物体（图像）会由于父子坐标系锁定，自动完美同步
+                    self.moving_item.moveBy(dx, dy)
+
+                    # 记录累计位移量，用于后期焊死到底图
+                    old_off = self.moving_item.data(1) or QPointF(0, 0)
+                    self.moving_item.setData(1, old_off + QPointF(dx, dy))
+
+                    # 关键：更新 last_move_pos 时要减去舍入误差，确保下一次计算精准
+                    self.last_move_pos += QPointF(dx, dy)
+                    self.scene.update()
+                return
+
+        # --- 情况 B: 默认拉框模式 ---
+        if self.temp_rect and is_left_button:
+            rect = QRectF(self.start_point, scene_pos).normalized()
+            # 同样对拉框进行像素对齐
+            self.temp_rect.setRect(rect.toAlignedRect())
+            self.scene.update()
