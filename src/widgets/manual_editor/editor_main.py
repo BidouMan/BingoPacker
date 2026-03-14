@@ -169,7 +169,7 @@ class ManualEditor(QWidget, EditorUI):
         self.scene.clear()
 
         self.preview_item = None
-        self.pixmap_item = None
+        self.preview_item = None
 
         self.frame_list.clear()
         self.current_frames = []
@@ -179,9 +179,11 @@ class ManualEditor(QWidget, EditorUI):
         self.view.checker_item = CheckerboardItem(rect)
         self.scene.addItem(self.view.checker_item)
 
-        self.pixmap_item = QGraphicsPixmapItem(pixmap)
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
-        self.scene.addItem(self.pixmap_item)
+        self.preview_item = QGraphicsPixmapItem(pixmap)
+        self.preview_item.setTransformationMode(
+            Qt.TransformationMode.FastTransformation
+        )
+        self.scene.addItem(self.preview_item)
 
         self.scene.setSceneRect(rect)
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
@@ -324,19 +326,22 @@ class ManualEditor(QWidget, EditorUI):
             target.on_editor_bundle_changed(self.current_bundle)
 
     def update_frame_list_ui(self):
-        """将裁切后的每一帧存入左侧列表，并强制正方形尺寸"""
-        self.frame_list.clear()
-        for i, frame in enumerate(self.current_frames):
-            pix = frame["pixmap"]
+        """强制从 Bundle 数据源刷新左侧列表，确保不为空"""
+        if not self.current_bundle or not self.current_bundle.frames:
+            print("DEBUG [UI]: Bundle 为空，清空列表")
+            self.frame_list.clear()
+            return
 
-            # --- 核心修改：i + 1 让显示从 "帧 01" 开始 ---
+        self.frame_list.clear()
+        # 核心：直接遍历 bundle 里的真实帧数据
+        for i, frame_data in enumerate(self.current_bundle.frames):
+            pix = frame_data.pixmap  # 注意这里是 frame_data.pixmap
+
             display_index = i + 1
             item = QListWidgetItem(f"帧 {display_index:02d}")
-
-            # 强制卡片为正方形尺寸，对应 UI 中的 list 宽度
             item.setSizeHint(QSize(78, 80))
 
-            # 列表内的缩略图处理
+            # 生成缩略图
             icon_pix = pix.scaled(
                 45,
                 45,
@@ -347,57 +352,30 @@ class ManualEditor(QWidget, EditorUI):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.frame_list.addItem(item)
 
-    # editor_main.py
+        print(f"DEBUG [UI]: 列表已刷新，共 {len(self.current_bundle.frames)} 帧")
 
     def switch_frame_preview(self, index):
-        """点击列表项时，在画布中间显示该帧"""
         if index < 0 or index >= len(self.current_frames):
             return
-        # 如果点击的是当前正在显示的帧，不做任何操作
-        if index == self.last_index and self.last_index != -1:
-            return
 
-        # --- 核心修复 A：在切换 index 之前，强制把旧帧的选区“焊死”在旧帧数据里 ---
+        # 1. 正常清理选区状态 (保持你原有的逻辑)
         if hasattr(self, "selection_manager") and self.last_index != -1:
-            # 【关键点】我们显式告诉管理器：请把当前的选区合并到 last_index 对应的那个数据块里
-            # 而不是让它自己去猜当前是哪一帧
             old_frame_data = self.current_frames[self.last_index]
             self.selection_manager.clear_selections(target_frame_data=old_frame_data)
-            print(f"DEBUG: 切换前已将选区强制合并至旧帧索引: {self.last_index}")
 
-        # 更新当前索引记录
         self.last_index = index
 
-        # --- 核心修复 B：物理清理场景，确保没有任何“脏 Item”残留到新场景 ---
-        for item in self.scene.items():
-            if item != self.view.checker_item:
-                self.scene.removeItem(item)
-        self.preview_item = None  # 强制重建底图对象
-
-        # --- 正常的显示逻辑 ---
+        # 2. 不要重建对象！只需换图
         pix = self.current_frames[index]["pixmap"]
+        self.preview_item.setPixmap(pix)
+
+        # 3. 适配场景大小
         new_rect = QRectF(0, 0, pix.width(), pix.height())
         self.scene.setSceneRect(new_rect)
         if hasattr(self.view, "checker_item"):
             self.view.checker_item.set_rect(new_rect)
 
-        if self.preview_item is None:
-            self.preview_item = QGraphicsPixmapItem()
-            self.scene.addItem(self.preview_item)
-
-        self.preview_item.setPixmap(pix)
-        self.preview_item.setVisible(True)
-        self.preview_item.setPos(0, 0)
-
         self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
-
-        if self.btn_pick.isChecked():
-            self.selection_manager.set_active(True)
-            # 确保光标也对齐
-            self.view.setCursor(Qt.CrossCursor)
-
-        self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
-        self.sync_and_notify()
 
     def on_save_clicked(self):
         """保存逻辑：集成 SliceLogic"""
@@ -489,7 +467,7 @@ class ManualEditor(QWidget, EditorUI):
         target_item = (
             self.preview_item
             if (self.preview_item and self.preview_item.isVisible())
-            else self.pixmap_item
+            else self.preview_item
         )
         if not target_item or not target_item.pixmap():
             return
@@ -541,7 +519,7 @@ class ManualEditor(QWidget, EditorUI):
         # 2. 核心修复：安全地获取目标底图
         # 使用 getattr 防御 NoneType 错误
         preview_item = getattr(self, "preview_item", None)
-        pixmap_item = getattr(self, "pixmap_item", None)
+        preview_item = getattr(self, "preview_item", None)
 
         target = None
         if preview_item is not None:
@@ -552,7 +530,7 @@ class ManualEditor(QWidget, EditorUI):
                 pass
 
         if target is None:
-            target = pixmap_item
+            target = preview_item
 
         if target is None:
             print("DEBUG [Editor]: 关键错误 - 找不到任何可用的底图 target")
@@ -625,8 +603,8 @@ class ManualEditor(QWidget, EditorUI):
             if (self.preview_item and self.preview_item.isVisible())
             else None
         )
-        if not target_item and hasattr(self, "pixmap_item"):
-            target_item = self.pixmap_item
+        if not target_item and hasattr(self, "preview_item"):
+            target_item = self.preview_item
 
         if not target_item or not target_item.pixmap():
             return
@@ -673,7 +651,7 @@ class ManualEditor(QWidget, EditorUI):
         target_item.setPixmap(new_pixmap)
 
         # 5. 如果是初次加载的底图，同步更新到 Bundle 数据模型
-        if target_item == getattr(self, "pixmap_item", None):
+        if target_item == getattr(self, "preview_item", None):
             if self.current_bundle:
                 self.current_bundle.original_pixmap = new_pixmap
                 if self.current_bundle.frames:
@@ -713,7 +691,7 @@ class ManualEditor(QWidget, EditorUI):
         target_item = (
             self.preview_item
             if (self.preview_item and self.preview_item.isVisible())
-            else self.pixmap_item
+            else self.preview_item
         )
         if target_item:
             full_rect = QRegion(target_item.pixmap().rect())
@@ -726,10 +704,10 @@ class ManualEditor(QWidget, EditorUI):
 
     def save_undo_state(self):
         """在任何修改操作（裁切、魔棒删除等）之前调用"""
-        if not hasattr(self, "pixmap_item") or self.pixmap_item is None:
+        if not hasattr(self, "preview_item") or self.preview_item is None:
             return
 
-        current_pixmap = self.pixmap_item.pixmap()
+        current_pixmap = self.preview_item.pixmap()
         if current_pixmap.isNull():
             return
 
@@ -752,8 +730,8 @@ class ManualEditor(QWidget, EditorUI):
         last_pixmap = self.undo_stack.pop()
 
         # 恢复图片
-        self.pixmap_item.setPixmap(last_pixmap)
-        self.pixmap_item.setPos(0, 0)
+        self.preview_item.setPixmap(last_pixmap)
+        self.preview_item.setPos(0, 0)
 
         # 同步更新场景和棋盘格（防止撤销的是裁切操作导致尺寸不对）
         new_rect = QRectF(0, 0, last_pixmap.width(), last_pixmap.height())
@@ -995,7 +973,7 @@ class ManualEditor(QWidget, EditorUI):
 
     # -----------------------------------------------------------------
     # 在 editor_main.py 的 ManualEditor 类中添加
-    def get_active_pixmap_item(self):
+    def get_active_preview_item(self):
         """统一获取当前操作的目标图元"""
         if (
             hasattr(self, "preview_item")
@@ -1003,39 +981,57 @@ class ManualEditor(QWidget, EditorUI):
             and self.preview_item.isVisible()
         ):
             return self.preview_item
-        return getattr(self, "pixmap_item", None)
+        return getattr(self, "preview_item", None)
 
     def apply_crop(self):
-        """确认裁切：从工具拿结果并更新"""
+        """干净、彻底的裁切与同步逻辑"""
         if not hasattr(self, "crop_box") or not self.crop_box:
             return
 
-        # 1. 向工具请求切割后的图像
+        # 1. 提取像素 (这步你现在是正常的)
         new_pixmap = self.crop_box.get_cropped_pixmap()
         if not new_pixmap or new_pixmap.isNull():
             return
 
-        # 2. 存档并更新 UI
+        # 2. 记录撤销并更新当前唯一的画布显示
         self.save_undo_state()
-        target_item = self.get_active_pixmap_item()
-        target_item.setPixmap(new_pixmap)
-        target_item.setPos(0, 0)
+        self.preview_item.setPixmap(new_pixmap)
+        self.preview_item.setPos(0, 0)
 
-        # 3. 场景适配 (棋盘格和背景)
-        new_rect = QRectF(0, 0, new_pixmap.width(), new_pixmap.height())
+        # 3. 强制同步所有数据源，消除“数据孤岛”
+        # 获取当前索引，默认为最后一次点击的索引
+        idx = getattr(self, "last_index", 0)
+        if idx == -1:
+            idx = 0
+
+        # A. 同步到 Bundle (持久层)
+        if self.current_bundle and self.current_bundle.frames:
+            if idx < len(self.current_bundle.frames):
+                self.current_bundle.frames[idx].pixmap = new_pixmap
+                self.current_bundle.original_pixmap = new_pixmap
+
+        # B. 同步到 current_frames (UI 绑定层) - 解决列表清空的关键
+        if hasattr(self, "current_frames") and self.current_frames:
+            if idx < len(self.current_frames):
+                # 必须直接修改字典里的 pixmap 引用
+                self.current_frames[idx]["pixmap"] = new_pixmap
+
+        # 4. 更新画布范围和棋盘格
+        new_rect = QRectF(new_pixmap.rect())
         self.scene.setSceneRect(new_rect)
         if hasattr(self.view, "checker_item"):
             self.view.checker_item.set_rect(new_rect)
 
-        # 4. 同步数据到 Bundle（如果是底图的话）
-        if target_item == getattr(self, "pixmap_item", None):
-            if self.current_bundle:
-                self.current_bundle.original_pixmap = new_pixmap
-                if self.current_bundle.frames:
-                    self.current_bundle.frames[0].pixmap = new_pixmap
+        # 5. 刷新 UI 列表：只要第 3-B 步同步了，这里就不会变空
+        self.update_frame_list_ui()
 
-        # 5. 退出模式
+        # 6. 恢复选中状态，防止用户迷失
+        if self.frame_list.count() > idx:
+            self.frame_list.setCurrentRow(idx)
+
+        # 7. 退出工具模式
         self.set_tool_mode(ToolMode.IDLE)
+        print(f"DEBUG [Apply]: 裁切完成，同步帧索引: {idx}")
 
     def set_tool_mode(self, mode):
         """
@@ -1082,7 +1078,7 @@ class ManualEditor(QWidget, EditorUI):
             self.selection_manager.active = True
 
         elif mode == ToolMode.CROP:
-            target = self.get_active_pixmap_item()
+            target = self.get_active_preview_item()
             if not target or not target.pixmap() or target.pixmap().isNull():
                 print("DEBUG [Editor]: 无效底图，无法开启裁切")
                 self.set_tool_mode(ToolMode.IDLE)
