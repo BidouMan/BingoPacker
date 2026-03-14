@@ -490,29 +490,24 @@ class SelectionManager:
         return final_sorted
 
     def _get_valid_selections(self):
-        """
-        寻找场景中所有的选区框（兼容矩形和路径项）。
-        """
-        from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem
-
+        """寻找场景中所有的选区框，增加极致防御，防止 Internal C++ object deleted"""
         valid = []
+        new_selections = []
 
-        # 获取场景中所有项
-        all_items = self.scene.items()
-        for item in all_items:
-            # 同时检查 PathItem 和 RectItem
-            is_selection_type = isinstance(item, (QGraphicsPathItem, QGraphicsRectItem))
-
-            if is_selection_type and item.isVisible():
-                # 排除掉掉那些被标记为像素层 (is_clone) 的对象
-                if not hasattr(item, "is_clone"):
-                    # 额外检查：确保它属于我们管理的 selections 列表，或者是我们画的框
-                    if item in self.selections:
+        for item in self.selections:
+            try:
+                # 尝试调用一个最基础的 C++ 方法，如果对象已删，这里会报 RuntimeError
+                if item.scene() is not None:
+                    # 如果能走到这，说明对象还活着
+                    if not hasattr(item, "is_clone") and item.isVisible():
                         valid.append(item)
+                    new_selections.append(item)
+            except (RuntimeError, AttributeError):
+                # 抓到僵尸对象，直接跳过，这样它就不会出现在 new_selections 里
+                continue
 
-        # 为了键盘操作能抓到“最新”的一个，我们按创建顺序倒序排列（selections 列表末尾是最新的）
-        # 或者直接返回 self.selections 中仍然在场景里的项
-        return [s for s in self.selections if s.scene()]
+        self.selections = new_selections
+        return valid
 
     def abort_selection(self):
         """【新增】强行中止选区工具，清理所有临时和正式选区"""
@@ -737,3 +732,15 @@ class SelectionManager:
             # 同样对拉框进行像素对齐
             self.temp_rect.setRect(rect.toAlignedRect())
             self.scene.update()
+
+    # selection_manager.py 内部
+    def force_reset_internal(self):
+        """
+        极致安全的重置：只清空引用，不访问任何可能已销毁的 C++ 对象。
+        专门用于场景切换或资源重新加载时。
+        """
+        self.selections = []
+        self.moving_item = None
+        self.temp_rect = None
+        self.start_point = None
+        self.last_move_pos = None

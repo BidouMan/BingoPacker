@@ -134,22 +134,31 @@ class ManualEditor(QWidget, EditorUI):
         self.magic_wand.tolerance = value
 
     def display_image(self, file_path):
+        """加载新资源并重置所有编辑器状态"""
         self.undo_stack.clear()
-        if hasattr(self, "crop_box") and self.crop_box:
-            try:
-                if self.crop_box.scene():
-                    self.scene.removeItem(self.crop_box)
-            except RuntimeError:
-                pass
-            self.crop_box = None
 
-            # 同步更新按钮状态
+        # --- 核心修复：在清理场景前，强制所有工具放弃对旧 Item 的引用 ---
+        # 这样可以防止 C++ 对象被销毁后，Python 这边还留着“僵尸指针”
+        if hasattr(self, "selection_manager"):
+            self.selection_manager.force_reset_internal()
+
+        if hasattr(self, "magic_wand_tool") and self.magic_wand_tool:
+            # 假设你的魔棒工具也维护了一个选区列表，需要强行置空
+            # 这里调用它的重置方法（如果没有请在 magic_wand.py 中添加）
+            if hasattr(self.magic_wand_tool, "reset"):
+                self.magic_wand_tool.reset()
+
+        # 处理裁切框状态
+        if hasattr(self, "crop_box") and self.crop_box:
+            # 此处不需要 removeItem，因为后面的 scene.clear() 会搞定
+            self.crop_box = None
             self.btn_cut.blockSignals(True)
             self.btn_cut.setChecked(False)
             self.btn_cut.blockSignals(False)
 
         if not os.path.exists(file_path):
             return
+
         self.update_selection_display(QRegion())
 
         pixmap = QPixmap(file_path)
@@ -166,11 +175,11 @@ class ManualEditor(QWidget, EditorUI):
         # 2. UI 状态重置
         self.current_source_path = file_path
         self.frame_list.blockSignals(True)
+
+        # --- 关键点：现在清理场景是安全的 ---
         self.scene.clear()
 
         self.preview_item = None
-        self.preview_item = None
-
         self.frame_list.clear()
         self.current_frames = []
 
@@ -188,7 +197,7 @@ class ManualEditor(QWidget, EditorUI):
         self.scene.setSceneRect(rect)
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
-        # 4. 左侧列表：原图卡片 (完全还原原始视觉)
+        # 4. 左侧列表：原图卡片渲染
         icon_area = 45
         canvas = QPixmap(icon_area, icon_area)
         canvas.fill(Qt.GlobalColor.transparent)
@@ -207,7 +216,6 @@ class ManualEditor(QWidget, EditorUI):
         item = QListWidgetItem()
         item.setIcon(QIcon(canvas))
         item.setText(os.path.basename(file_path))
-        # --- 核心修复：强制卡片尺寸，解决不是正方形的问题 ---
         item.setSizeHint(QSize(78, 80))
         item.setTextAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom
