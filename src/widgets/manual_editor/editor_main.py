@@ -221,6 +221,8 @@ class ManualEditor(QWidget, EditorUI):
         self.frame_list.setCurrentRow(0)
         self._sync_to_global_preview(file_path, pixmap)
 
+        self.update_status_bar()  # 刷新状态栏显示
+
     def _sync_to_global_preview(self, file_path, pixmap):
         """将当前编辑器加载的单图同步到全局 AssetTree 和 PreviewPanel"""
         # 1. 构造 FrameData 时传入 rect
@@ -326,6 +328,8 @@ class ManualEditor(QWidget, EditorUI):
                 self.current_bundle, self.current_bundle.segments[0]
             )
 
+        self.update_status_bar()  # 刷新状态栏显示
+
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""
         target = self.parent()
@@ -402,6 +406,7 @@ class ManualEditor(QWidget, EditorUI):
 
         # 刷新视图，防止旧残影
         self.view.update()
+        self.update_status_bar()  # 刷新状态栏显示
 
     def on_save_clicked(self):
         """保存按钮：精准抓取像素，排除棋盘格"""
@@ -1033,6 +1038,8 @@ class ManualEditor(QWidget, EditorUI):
         # 7. 退出工具模式
         self.set_tool_mode(ToolMode.IDLE)
 
+        self.update_status_bar()  # 刷新状态栏显示
+
     def _reset_tool_buttons(self):
         """将所有工具按钮恢复到未选中状态"""
         self.btn_pick.blockSignals(True)
@@ -1045,6 +1052,34 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_pick.blockSignals(False)
         self.btn_magic_wand.blockSignals(False)
         self.btn_cut.blockSignals(False)
+
+    def update_status_bar(self):
+        """同步底部所有标签的信息"""
+        if not self.current_bundle:
+            return
+
+        # 1. 更新帧序号
+        total_frames = len(self.current_bundle.frames)
+        curr_idx = self.frame_list.currentRow() + 1
+        self.lbl_frame_index.setText(
+            f"帧: {curr_idx if curr_idx > 0 else 0} / {total_frames}"
+        )
+
+        # 2. 更新尺寸
+        if self.preview_item and self.preview_item.pixmap():
+            pix = self.preview_item.pixmap()
+            self.lbl_frame_size.setText(f"尺寸: {pix.width()} x {pix.height()} PX")
+
+        # # 3. 更新缩放 (如果你的 ScalableView 有这个属性)
+        # if hasattr(self.view, "current_zoom"):
+        #     zoom = int(self.view.current_zoom * 100)
+        #     self.lbl_zoom_level.setText(f"缩放: {zoom}%")
+
+        # 4. 【新增】更新资源名
+        if hasattr(self, "lbl_res_name"):
+            # 假设 bundle.name 存储了文件名，如果没有，可以用 os.path.basename(self.current_bundle.path)
+            res_name = getattr(self.current_bundle, "name", "未知资源")
+            self.lbl_res_name.setText(f"资源: {res_name}")
 
     def set_tool_mode(self, mode):
         """

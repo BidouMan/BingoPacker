@@ -1,8 +1,19 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QFrame, QPushButton, QButtonGroup,
-                               QLabel,QSlider,QCheckBox)
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QListWidget,
+    QFrame,
+    QPushButton,
+    QButtonGroup,
+    QLabel,
+    QSlider,
+    QCheckBox,
+)
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 import os
+
 
 class EditorUI:
     def setup_ui(self, widget: QWidget):
@@ -69,12 +80,16 @@ class EditorUI:
         toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         # 基础按钮 - 严格保持你的原始定义（不限制 size，不改文字）
-        self.btn_new_file = self._create_tool_btn("btn_new_file",'新建')
+        self.btn_new_file = self._create_tool_btn("btn_new_file", "新建")
         self.btn_save = self._create_tool_btn("btn_save", "保存")
-        self.btn_magic_wand = self._create_tool_btn("btn_magic_wand", "选取", checkable=True)
+        self.btn_magic_wand = self._create_tool_btn(
+            "btn_magic_wand", "选取", checkable=True
+        )
         self.btn_pick = self._create_tool_btn("btn_pick", "选取", checkable=True)
-        self.btn_slice = self._create_tool_btn("on_slice_clicked", "裁切", checkable=True)
-        self.btn_cut= self._create_tool_btn("btn_cut", "调整画布", checkable=True)
+        self.btn_slice = self._create_tool_btn(
+            "on_slice_clicked", "裁切", checkable=True
+        )
+        self.btn_cut = self._create_tool_btn("btn_cut", "调整画布", checkable=True)
 
         self.tool_group = QButtonGroup(widget)
         self.tool_group.addButton(self.btn_magic_wand)
@@ -102,10 +117,10 @@ class EditorUI:
         self.btn_expand = QPushButton("扩")
         self.btn_shrink = QPushButton("缩")
         self.btn_invert = QPushButton("反")
-        
+
         # 容差滑动条与百分比
         mw_layout.addWidget(QLabel("容差"))
-        
+
         self.slider_tolerance = QSlider(Qt.Orientation.Horizontal)
         self.slider_tolerance.setRange(0, 255)
         self.slider_tolerance.setValue(25)
@@ -123,7 +138,6 @@ class EditorUI:
         mw_layout.addWidget(self.btn_expand)
         mw_layout.addWidget(self.btn_shrink)
         mw_layout.addWidget(self.btn_invert)
-        
 
         toolbar_layout.addWidget(self.magic_wand_panel)
         layout.addWidget(self.toolbar)
@@ -132,20 +146,84 @@ class EditorUI:
         content_layout = QHBoxLayout()
         self.frame_list = QListWidget()
         self.frame_list.setFixedWidth(82)
-        self.frame_list.setViewMode(QListWidget.IconMode) 
-        self.frame_list.setResizeMode(QListWidget.Adjust) 
+        self.frame_list.setViewMode(QListWidget.IconMode)
+        self.frame_list.setResizeMode(QListWidget.Adjust)
         self.frame_list.setMovement(QListWidget.Static)
-        self.frame_list.setIconSize(QSize(48, 48)) 
-        self.frame_list.setGridSize(QSize(74, 78)) 
+        self.frame_list.setIconSize(QSize(48, 48))
+        self.frame_list.setGridSize(QSize(74, 78))
         self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.verticalScrollBar().setFixedWidth(0)
         self.frame_list.verticalScrollBar().setStyleSheet("width: 0px; height: 0px;")
         # self.frame_list.installEventFilter(self)
+        # --- 内容区重构 ---
+        # --- 内容区重构 ---
+        content_layout = QHBoxLayout()
+        # 左侧列表保持原样...
         content_layout.addWidget(self.frame_list)
+
+        # 2. 右侧垂直容器
+        right_main_layout = QVBoxLayout()
+        right_main_layout.setSpacing(0)
+        right_main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 3. 画布布局
         self.canvas_layout = QVBoxLayout()
-        content_layout.addLayout(self.canvas_layout)
+        self.canvas_layout.setSpacing(0)
+        self.canvas_layout.setContentsMargins(0, 0, 0, 0)
+        right_main_layout.addLayout(self.canvas_layout)
+
+        # 4. 底部状态栏容器 (解决黑线的关键样式)
+        self.status_bar = QFrame()
+        self.status_bar.setFixedHeight(26)
+        # 使用 border-top 代替 border，且强制设为 0px 或指定颜色，消除系统自动生成的黑边
+        self.status_bar.setStyleSheet("""
+            QFrame {
+                background-color: #21252b; 
+                border: none;
+                border-top: 1px solid #181a1f; /* 这里的颜色要比背景深，模拟刻痕感而非脏黑线 */
+            }
+            QLabel {
+                color: #5c6370; /* 灰蓝色文字，不刺眼 */
+                font-size: 11px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                padding: 0 8px;
+                border: none; /* 确保 Label 内部没边框 */
+            }
+        """)
+
+        status_layout = QHBoxLayout(self.status_bar)
+        status_layout.setContentsMargins(10, 0, 10, 0)
+        status_layout.setSpacing(0)
+
+        # --- 添加多个资源信息 Label ---
+        self.lbl_frame_index = QLabel("帧: 0/0")
+        self.lbl_frame_size = QLabel("尺寸: 0 x 0")
+        self.lbl_res_name = QLabel("资源: --")  # 显示当前文件名
+        self.lbl_zoom = QLabel("100%")  # 缩放比例
+
+        # 依次排列
+        status_layout.addWidget(self.lbl_frame_index)
+        status_layout.addWidget(self._create_v_line())  # 添加竖向分割线
+        status_layout.addWidget(self.lbl_frame_size)
+        status_layout.addWidget(self._create_v_line())
+        status_layout.addWidget(self.lbl_res_name)
+
+        status_layout.addStretch()  # 弹簧
+
+        # status_layout.addWidget(self.lbl_zoom)
+
+        right_main_layout.addWidget(self.status_bar)
+        content_layout.addLayout(right_main_layout)
         layout.addLayout(content_layout)
+
+    def _create_v_line(self):
+        """创建一个精致的垂直分割线"""
+        line = QFrame()
+        line.setFixedWidth(1)
+        line.setFixedHeight(12)
+        line.setStyleSheet("background-color: #3e4451;")
+        return line
 
     def _create_tool_btn(self, icon_name, tip, checkable=False):
         btn = QPushButton()
