@@ -135,7 +135,15 @@ class ManualEditor(QWidget, EditorUI):
         """
         if hasattr(self, "selection_manager") and self.selection_manager.selections:
             # 此时 self.frame_list.currentRow() 还是旧的索引
-            self.selection_manager.clear_selections()
+            old_index = self.frame_list.currentRow()
+            # 确保旧帧的修改被保存
+            if 0 <= old_index < len(self.current_bundle.frames):
+                # 合并选区到旧帧
+                self.selection_manager.clear_selections(
+                    target_frame_data=self.current_bundle.frames[old_index]
+                )
+            else:
+                self.selection_manager.clear_selections()
 
     def _on_tolerance_changed(self, value):
         """同步显示百分比并更新魔棒工具的内部容差值"""
@@ -416,6 +424,13 @@ class ManualEditor(QWidget, EditorUI):
         if index < 0 or index >= len(self.current_frames):
             return
 
+        # 清理之前的选区，防止选区残留
+        self.deselect_all()
+
+        # 确保当前帧的修改已经保存
+        if self.selection_manager and self.selection_manager.selections:
+            self.selection_manager.clear_selections()
+
         data_item = self.current_frames[index]
         # 确保拿到 Pixmap
         pix = (
@@ -436,6 +451,7 @@ class ManualEditor(QWidget, EditorUI):
             self.scene.addItem(self.preview_item)
             self.preview_item.setZValue(0)
         else:
+            # 确保使用当前帧的正确pixmap
             self.preview_item.setPixmap(pix)
 
         # --- 核心修复：重置场景和视图范围 ---
@@ -456,6 +472,9 @@ class ManualEditor(QWidget, EditorUI):
         # 刷新视图，防止旧残影
         self.view.update()
         self.update_status_bar()  # 刷新状态栏显示
+
+        # 确保数据同步
+        self.sync_and_notify()
 
     def on_save_clicked(self):
         """保存按钮：精准抓取像素，排除棋盘格"""
@@ -805,15 +824,28 @@ class ManualEditor(QWidget, EditorUI):
         # 4. 更新 UI 显示
         target_item.setPixmap(new_pixmap)
 
-        # 5. 如果是初次加载的底图，同步更新到 Bundle 数据模型
-        if target_item == getattr(self, "preview_item", None):
-            if self.current_bundle:
+        # 5. 同步更新到 Bundle 数据模型 - 修复数据同步问题
+        if self.current_bundle:
+            # 获取当前帧索引
+            current_index = self.frame_list.currentRow()
+            # 更新对应帧的pixmap
+            if 0 <= current_index < len(self.current_bundle.frames):
+                self.current_bundle.frames[current_index].pixmap = new_pixmap
+                # 同时更新original_pixmap
                 self.current_bundle.original_pixmap = new_pixmap
-                if self.current_bundle.frames:
-                    self.current_bundle.frames[0].pixmap = new_pixmap
+                # 同步更新current_frames
+                if hasattr(self, "current_frames") and 0 <= current_index < len(
+                    self.current_frames
+                ):
+                    if isinstance(self.current_frames[current_index], dict):
+                        self.current_frames[current_index]["pixmap"] = new_pixmap
+                    elif hasattr(self.current_frames[current_index], "pixmap"):
+                        self.current_frames[current_index].pixmap = new_pixmap
 
         # 6. 清理选区和蚂蚁线
         self.deselect_all()
+        # 7. 同步所有UI组件
+        self.sync_and_notify()
 
     def on_expand_selection(self):
         if self.selection_mask:
@@ -1058,22 +1090,51 @@ class ManualEditor(QWidget, EditorUI):
         if not self.current_bundle:
             return
 
-        # 1. 强制发射信号，带上最新的数据
+        # 1. 确保current_frames与current_bundle.frames同步
+        if hasattr(self, "current_frames") and self.current_bundle.frames:
+            # 确保current_frames的长度与current_bundle.frames一致
+            if len(self.current_frames) != len(self.current_bundle.frames):
+                self.current_frames = []
+                for frame in self.current_bundle.frames:
+                    if hasattr(frame, "pixmap"):
+                        self.current_frames.append({"pixmap": frame.pixmap})
+                    else:
+                        self.current_frames.append(frame)
+            else:
+                # 同步每个帧的pixmap
+                for i, frame in enumerate(self.current_bundle.frames):
+                    if i < len(self.current_frames):
+                        if isinstance(self.current_frames[i], dict):
+                            self.current_frames[i]["pixmap"] = frame.pixmap
+                        elif hasattr(self.current_frames[i], "pixmap"):
+                            self.current_frames[i].pixmap = frame.pixmap
+
+        # 2. 强制发射信号，带上最新的数据
         # 只要这一行执行了，你的右侧预览面板、动画播放就一定会变
         self.bundle_updated.emit(self.current_bundle, {})
 
-        # 2. 刷新左侧列表的图标
-        curr_idx = self.frame_list.currentRow()
-        if 0 <= curr_idx < len(self.current_bundle.frames):
-            f_data = self.current_bundle.frames[curr_idx]
-            pix = f_data.pixmap if hasattr(f_data, "pixmap") else f_data.get("pixmap")
+        # 3. 刷新左侧列表的图标
+        for i, frame_data in enumerate(self.current_bundle.frames):
+            pix = (
+                frame_data.pixmap
+                if hasattr(frame_data, "pixmap")
+                else frame_data.get("pixmap")
+            )
             if pix:
                 icon_pix = pix.scaled(
                     48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
-                item = self.frame_list.item(curr_idx)
+                item = self.frame_list.item(i)
                 if item:
                     item.setIcon(QIcon(icon_pix))
+
+        # 4. 确保预览面板同步
+        if hasattr(self, "preview_panel") and self.preview_panel:
+            self.preview_panel.play_timer.stop()
+            if self.current_bundle.segments:
+                self.preview_panel.start_segment_preview(
+                    self.current_bundle, self.current_bundle.segments[0]
+                )
 
         self.view.update()
 

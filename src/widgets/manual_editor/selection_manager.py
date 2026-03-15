@@ -374,12 +374,25 @@ class SelectionManager:
         if editor:
             # 优先使用显式传入的 target_frame_data
             if target_frame_data is not None:
-                target_frame_data["pixmap"] = new_bg_pix
+                if isinstance(target_frame_data, dict):
+                    target_frame_data["pixmap"] = new_bg_pix
+                elif hasattr(target_frame_data, "pixmap"):
+                    target_frame_data.pixmap = new_bg_pix
             else:
                 # 否则使用当前选中的索引（注意：这里要确保 index 是切换前的 index）
                 idx = editor.frame_list.currentRow()
                 if 0 <= idx < len(editor.current_frames):
-                    editor.current_frames[idx]["pixmap"] = new_bg_pix
+                    if isinstance(editor.current_frames[idx], dict):
+                        editor.current_frames[idx]["pixmap"] = new_bg_pix
+                    elif hasattr(editor.current_frames[idx], "pixmap"):
+                        editor.current_frames[idx].pixmap = new_bg_pix
+
+                # 同步更新 AssetBundle 数据
+                if editor.current_bundle and 0 <= idx < len(
+                    editor.current_bundle.frames
+                ):
+                    editor.current_bundle.frames[idx].pixmap = new_bg_pix
+                    editor.current_bundle.original_pixmap = new_bg_pix
 
             # 触发编辑器同步到 AssetBundle 并通知预览面板
             editor.sync_and_notify()
