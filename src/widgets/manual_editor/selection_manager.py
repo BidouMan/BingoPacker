@@ -413,75 +413,6 @@ class SelectionManager:
         except Exception as e:
             print(f"Sync error: {e}")
 
-    def get_sorted_selections(self):
-        """
-        按照“从上到下，从左到右”的逻辑返回相对于底图的矩形区域
-        """
-        valid_items = self._get_valid_selections()
-        if not valid_items:
-            return []
-
-        # 获取底图对象，用于坐标转换
-        bg_item = next(
-            (
-                i
-                for i in self.scene.items()
-                if isinstance(i, QGraphicsPixmapItem) and not hasattr(i, "is_clone")
-            ),
-            None,
-        )
-
-        data = []
-        for item in valid_items:
-            # 1. 获取场景矩形并转为底图局部矩形
-            scene_rect = item.sceneBoundingRect()
-            if bg_item:
-                local_top_left = bg_item.mapFromScene(scene_rect.topLeft()).toPoint()
-                # 转换成整数像素矩形，方便直接用于裁切
-                rect = QRect(local_top_left, scene_rect.size().toSize())
-            else:
-                rect = scene_rect.toRect()
-
-            data.append(
-                {
-                    "rect": rect,
-                    "center_y": rect.center().y(),
-                    "center_x": rect.center().x(),
-                    "height": rect.height(),
-                }
-            )
-
-        # 2. 计算平均高度作为分行阈值
-        avg_height = sum(d["height"] for d in data) / len(data)
-        row_threshold = avg_height * 0.7  # 稍微调高阈值到 0.7，容错性更高
-
-        # 3. 排序逻辑
-        data.sort(key=lambda d: d["center_y"])
-
-        final_sorted = []
-        current_row = []
-
-        if data:
-            # 使用当前行的起始 Y 值
-            row_y_reference = data[0]["center_y"]
-            for d in data:
-                # 判断是否属于同一行
-                if abs(d["center_y"] - row_y_reference) < row_threshold:
-                    current_row.append(d)
-                else:
-                    # 处理旧行：行内按 X 排序
-                    current_row.sort(key=lambda x: x["center_x"])
-                    final_sorted.extend([r["rect"] for r in current_row])
-                    # 开启新行
-                    current_row = [d]
-                    row_y_reference = d["center_y"]
-
-            # 处理最后一行
-            current_row.sort(key=lambda x: x["center_x"])
-            final_sorted.extend([r["rect"] for r in current_row])
-
-        return final_sorted
-
     def _get_valid_selections(self):
         """寻找场景中所有的选区框，增加极致防御，防止 Internal C++ object deleted"""
         valid = []
@@ -578,13 +509,14 @@ class SelectionManager:
             return
 
         final_rect = self.temp_rect.rect()
+        # 过滤掉过小的点击误触
         if final_rect.width() > 2 and final_rect.height() > 2:
             mode = self.temp_rect.data(0)
             new_path = QPainterPath()
             new_path.addRect(final_rect)
 
             if mode == "SUBTRACT":
-                # --- 减选逻辑 (保持不变) ---
+                # --- 减选逻辑 ---
                 for item in self.selections[:]:
                     item_path = self._get_item_path(item)
                     if item_path.intersects(new_path):
@@ -593,10 +525,11 @@ class SelectionManager:
                             self._remove_item(item)
                         else:
                             self._update_item_shape(item, res_path)
+                # 减选框本身不保留
                 self.scene.removeItem(self.temp_rect)
 
             elif mode == "MERGE":
-                # --- Shift 合并模式：寻找相交的并合并 ---
+                # --- 合并逻辑 ---
                 merged = False
                 for item in self.selections[:]:
                     item_path = self._get_item_path(item)
@@ -607,17 +540,22 @@ class SelectionManager:
                         break
 
                 if not merged:
-                    # 如果没点到任何旧选区，就作为一个新选区加入
+                    # 如果没合并到旧的，就把这个临时框转正
                     self.selections.append(self.temp_rect)
+                    # 关键：不要在这里销毁它，因为它已经是列表的一员了
                 else:
                     self.scene.removeItem(self.temp_rect)
 
             else:  # mode == "CREATE"
-                # --- 默认模式：直接创建，无视重叠 ---
+                # --- 正常创建：转正临时框 ---
                 self.selections.append(self.temp_rect)
+                # 注意：此时 temp_rect 已经在场景里了，直接存入列表即可
 
+            # 重要：在存入列表后，我们要切断 temp_rect 的引用，但不能 removeItem
+            # 只有那些没被存入 selections 的才需要被 removeItem
             self.temp_rect = None
         else:
+            # 太小的框直接删除
             if self.temp_rect.scene():
                 self.scene.removeItem(self.temp_rect)
             self.temp_rect = None

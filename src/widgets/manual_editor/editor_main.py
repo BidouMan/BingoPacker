@@ -272,11 +272,12 @@ class ManualEditor(QWidget, EditorUI):
 
     def on_do_slice(self):
         """
-        智能裁切逻辑：确保数据物理同步到 Bundle，并刷新 UI
+        最终修复版本：
+        1. 修复坐标转换：将场景图元转换为底图像素矩形 (QRect)
+        2. 修复数据类型：确保传给 run_manual_slice 的是 QRect 列表而非图元列表
+        3. 修复执行顺序：先提取坐标，再切换工具模式
         """
-        self.set_tool_mode(ToolMode.IDLE)
-        self._reset_tool_buttons()
-        # 1. 寻找画布上的底图
+        # --- 第一阶段：寻找底图 ---
         bg_item = next(
             (
                 i
@@ -285,31 +286,53 @@ class ManualEditor(QWidget, EditorUI):
             ),
             None,
         )
+
+        # --- 第二阶段：在状态重置前，提取并转换选区坐标 ---
+        manual_selection_rects = []
+
+        if bg_item and self.selection_manager.selections:
+            # 1. 获取当前所有有效的图元对象
+            valid_items = self.selection_manager._get_valid_selections()
+
+            # 2. 【关键修复】将场景图元转换为底图局部的 QRect
+            for item in valid_items:
+                # 获取该框在场景中的矩形
+                scene_rect = item.sceneBoundingRect()
+                # 转换到底图图元的局部坐标系（处理图片移动/缩放后的偏移）
+                local_rect = bg_item.mapFromScene(scene_rect).boundingRect()
+                # 转换为整数矩形 QRect (run_manual_slice 要求的格式)
+                manual_selection_rects.append(local_rect.toRect())
+
+        # --- 第三阶段：重置 UI 状态 ---
+        # 注意：这里会清空 selection_manager.selections，但我们已经拿到了 manual_selection_rects
+        self.set_tool_mode(ToolMode.IDLE)
+        self._reset_tool_buttons()
+
         if not bg_item:
             return
 
-        # 2. 获取裁切后的结果
-        rects = self.selection_manager.get_sorted_selections()
-        source_pixmap = bg_item.pixmap()
+        # --- 第四阶段：执行裁切逻辑 ---
+        new_frames_data = []
 
-        if rects:
-            # 手动框选裁切
-            new_frames_data = self.slice_logic.run_manual_slice(bg_item, rects)
+        if manual_selection_rects:
+            # 路径 A: 手动选区裁切 (传入的是 QRect 列表)
+            new_frames_data = self.slice_logic.run_manual_slice(
+                bg_item, manual_selection_rects
+            )
         else:
-            # 自动识别裁切
+            # 路径 B: 自动智能裁切
+            source_pixmap = bg_item.pixmap()
             new_frames_data = self.slice_logic.run_auto_slice_to_preview(source_pixmap)
 
         if not new_frames_data:
             return
 
+        # --- 第五阶段：数据持久化与 UI 刷新 ---
         self.save_undo_state()
 
-        # 3. 【核心同步】将结果写回 Bundle（这是 update_frame_list_ui 的数据源）
         if self.current_bundle:
-            # 物理清空并重新填充 Bundle 的 frames
             self.current_bundle.frames = []
             for i, f in enumerate(new_frames_data, start=1):
-                # 将字典数据包装回 FrameData 对象
                 frame_obj = FrameData(
                     pixmap=f["pixmap"],
                     rect=f.get("rect", QRectF()),
@@ -317,52 +340,41 @@ class ManualEditor(QWidget, EditorUI):
                 )
                 self.current_bundle.frames.append(frame_obj)
 
-            # 同步更新 current_frames 变量，保持内存中引用一致
             self.current_frames = new_frames_data
 
-            # 更新片段范围（Default 段落涵盖所有新帧）
+            # 自动调整段落范围
             new_count = len(self.current_bundle.frames)
             for s in self.current_bundle.segments:
                 if s.get("name") == "动画":
                     s["start"] = 1
                     s["end"] = new_count
 
-        # 4. 清理选区残留
-        self.selection_manager.clear_selections()  # 建议调用 manager 自带的清理
-        self.selection_manager.active = False
+        # 清理与重绘列表
+        self.selection_manager.clear_selections()
+        self.frame_list.clear()
+        self.update_frame_list_ui()
 
-        # 5. 【关键】不要完全删除 preview_item 导致丢失，而是重置它
-        # 我们保留一个干净的画布，由 switch_frame_preview 去填充内容
-        self.frame_list.clear()  # 先清空旧列表 UI
-        self.update_frame_list_ui()  # 重新从 Bundle 读取并填充
-
-        # 6. 重置按钮和索引
-        self.btn_slice.setChecked(False)
-        self.last_index = -1
-
-        # 7. 切换到第一帧（这会自动设置 preview_item 的 Pixmap 和位置）
-        if self.current_bundle.frames:
+        # 选中第一帧并自动适配视图
+        if self.current_bundle and self.current_bundle.frames:
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
 
-            # 只要更新了画布，强制居中一次。
-            # 如果想自动适配大小居中，用 fitInView
             rect = self.preview_item.boundingRect()
+            # 让视图自动缩放到合适大小展示切好的内容
             self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
             if hasattr(self.view, "reset_pan_state"):
                 self.view.reset_pan_state()
 
         self.sync_and_notify()
 
-        if hasattr(self, "preview_panel"):
-            # 强制先停一下，防止裁切瞬间逻辑抖动导致的计时器加速
+        if hasattr(self, "preview_panel") and self.current_bundle:
             self.preview_panel.play_timer.stop()
-            # 重新启动预览
             self.preview_panel.start_segment_preview(
                 self.current_bundle, self.current_bundle.segments[0]
             )
 
-        self.update_status_bar()  # 刷新状态栏显示
+        self.update_status_bar()
+        self.btn_slice.setChecked(False)
 
     def _sync_after_slice(self):
         """专门用于裁切后的同步"""
@@ -1192,7 +1204,6 @@ class ManualEditor(QWidget, EditorUI):
 
         # --- 第二阶段：更新模式 ---
         self.current_tool_mode = mode
-        # print(f"Tool changed to: {mode}")
 
         is_wand = mode == ToolMode.MAGIC_WAND
         self.magic_wand_panel.setVisible(is_wand)
