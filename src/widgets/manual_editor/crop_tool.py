@@ -120,21 +120,24 @@ class CropBoxItem(QGraphicsRectItem):
         painter.save()
 
         # 1. 绘制外部深色阴影 (遮罩)
-        if self.scene():
-            # 获取当前视图可见的场景范围（或者简单使用 sceneRect）
+        if self.parentItem():
+            # 使用父图元（即被裁剪的图片）作为遮罩范围，避免依赖 sceneRect 导致的黑色空白
+            parent_rect = self.parentItem().boundingRect()
+            local_scene = parent_rect
+        elif self.scene():
+            # 兜底：没有父图元时再用场景范围
             scene_rect = self.scene().sceneRect()
-            # 将场景矩形转换到本地坐标
             local_scene = self.mapFromScene(scene_rect).boundingRect()
 
-            mask_path = QPainterPath()
-            mask_path.addRect(local_scene)  # 外圈
-            mask_path.addRect(r)  # 内圈（裁切框）
+        mask_path = QPainterPath()
+        mask_path.addRect(local_scene)  # 外圈
+        mask_path.addRect(r)  # 内圈（裁切框）
 
-            # 使用 OddEvenFill，两个矩形重叠的部分（框内）会变透明，不重叠的部分（框外）填深色
-            mask_path.setFillRule(Qt.FillRule.OddEvenFill)
-            painter.setBrush(QBrush(QColor(0, 0, 0, 160)))  # 半透明黑色
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawPath(mask_path)
+        # 使用 OddEvenFill，两个矩形重叠的部分（框内）会变透明，不重叠的部分（框外）填深色
+        mask_path.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 160)))  # 半透明黑色
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPath(mask_path)
 
         # 2. 绘制九宫格辅助线
         painter.setPen(QPen(QColor(255, 255, 255, 100), 0, Qt.PenStyle.DashLine))

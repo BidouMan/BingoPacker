@@ -43,7 +43,11 @@ class ScalableView(QGraphicsView):
         self.checker_item = None
         self.setAcceptDrops(True)
         self._is_panning = False
+        self._user_panned = False  # 用于判断用户是否主动平移过视图
         self._last_mouse_pos = QPoint()
+
+        # 当前“内容”的边界（通常是图片的场景坐标范围）
+        self._content_rect = QRectF()
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -95,11 +99,19 @@ class ScalableView(QGraphicsView):
             return Qt.CrossCursor
         if hasattr(self, "selection_manager") and self.selection_manager.active:
             return Qt.CrossCursor
-        return Qt.OpenHandCursor
+        # 默认不显示手掌，仅在按下中键时显示（ClosedHandCursor）
+        return Qt.ArrowCursor
 
     def update_cursor_style(self):
         """唯一允许修改光标的入口"""
         self.viewport().setCursor(self.get_appropriate_cursor())
+
+    def reset_pan_state(self):
+        """重置用户是否已平移的状态（如新加载图片时调用）。"""
+        self._user_panned = False
+
+    def has_user_panned(self):
+        return self._user_panned
 
     def mousePressEvent(self, event):
         """
@@ -128,11 +140,16 @@ class ScalableView(QGraphicsView):
             self.verticalScrollBar().setValue(
                 self.verticalScrollBar().value() - delta.y()
             )
+            # 用户主动拖动后，不再自动重置为居中视图
+            self._user_panned = True
             event.accept()
             return
 
         # 模式分发交给 eventFilter 拦截，这里只做基础透传
         super().mouseMoveEvent(event)
+
+        # 允许通过滚动条或缩放改变后重新计算 sceneRect
+        self._update_scene_rect_for_panning()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MiddleButton:
@@ -142,6 +159,9 @@ class ScalableView(QGraphicsView):
             return
 
         super().mouseReleaseEvent(event)
+
+        # 鼠标释放后更新 sceneRect，确保本次拖拽后的最新偏移仍可平移
+        self._update_scene_rect_for_panning()
 
     def wheelEvent(self, event):
         """缩放逻辑必须在 View 层级"""
@@ -157,7 +177,10 @@ class ScalableView(QGraphicsView):
         else:
             self.scale(zoom_out_factor, zoom_out_factor)
 
-        # 3. 关键：接受事件，阻止它继续向上传递或向下分发给 Item
+        # 3. 缩放后刷新 sceneRect，保持可拖动范围
+        self._update_scene_rect_for_panning()
+
+        # 4. 关键：接受事件，阻止它继续向上传递或向下分发给 Item
         event.accept()
 
     def mouseDoubleClickEvent(self, event):
@@ -166,6 +189,60 @@ class ScalableView(QGraphicsView):
             self.selection_manager.handle_double_click(scene_pos)
             return
         super().mouseDoubleClickEvent(event)
+
+    def _update_scene_rect_for_panning(self):
+        """在保持内容可见的前提下，为画布平移提供可用滚动范围。
+
+        如果内容（例如图片）比视口小，默认 QGraphicsView 会关闭滚动范围，
+        导致中键拖动无法移动视图。我们通过让 sceneRect 扩展为至少与视口等大，
+        并在两侧留出空白来实现“自由拖动但不让内容完全移出视口”。
+        """
+        if self._content_rect.isNull():
+            return
+
+        if self.viewport().width() == 0 or self.viewport().height() == 0:
+            # 视图尚未布局完成时，先保证 sceneRect 至少和内容一致。
+            self.setSceneRect(self._content_rect)
+            return
+
+        # 以当前变换后的视口尺寸为基准（已考虑缩放）
+        view_scene_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+
+        # 计算一个可拖动的 sceneRect：
+        # - 如果内容比视口大，则直接使用内容大小（支持滚动）
+        # - 如果内容比视口小，则将 sceneRect 扩大到 "2*视口 - 内容"，
+        #   这样可以在不让内容完全离开视口的前提下实现左右/上下拖动
+        vw = view_scene_rect.width()
+        vh = view_scene_rect.height()
+        cw = self._content_rect.width()
+        ch = self._content_rect.height()
+
+        width = max(cw, 2 * vw - cw)
+        height = max(ch, 2 * vh - ch)
+
+        dx = (width - cw) / 2
+        dy = (height - ch) / 2
+
+        padded = QRectF(
+            self._content_rect.x() - dx,
+            self._content_rect.y() - dy,
+            width,
+            height,
+        )
+
+        # 只有在需要时才设置（避免频繁触发 scroll 更新）
+        if self.sceneRect() != padded:
+            self.setSceneRect(padded)
+
+    def set_content_rect(self, rect: QRectF):
+        """设置当前内容（如图片）的边界，并更新 sceneRect 以支持平移。"""
+        self._content_rect = rect
+        self._update_scene_rect_for_panning()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 视口大小变化后，重新计算 sceneRect 以保持可拖动范围。
+        self._update_scene_rect_for_panning()
 
     def get_canvas_coordinates(self, pos):
         """将鼠标相对于窗口的坐标转换为相对于图片的像素坐标"""

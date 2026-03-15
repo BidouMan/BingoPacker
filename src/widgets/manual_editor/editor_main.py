@@ -189,8 +189,16 @@ class ManualEditor(QWidget, EditorUI):
         )
         self.scene.addItem(self.preview_item)
 
-        self.scene.setSceneRect(rect)
+        # 让 view 负责管理 sceneRect（便于实现自由平移）
+        if hasattr(self.view, "set_content_rect"):
+            self.view.set_content_rect(rect)
+        else:
+            self.scene.setSceneRect(rect)
+
+        # 初次加载图片时，将视图缩放到合适大小，并重置“用户平移”状态
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        if hasattr(self.view, "reset_pan_state"):
+            self.view.reset_pan_state()
 
         # 4. 左侧列表：原图卡片渲染
         icon_area = 45
@@ -395,7 +403,10 @@ class ManualEditor(QWidget, EditorUI):
 
         # --- 核心修复：重置场景和视图范围 ---
         rect = QRectF(pix.rect())
-        self.scene.setSceneRect(rect)  # 强制场景大小等于当前帧
+        if hasattr(self.view, "set_content_rect"):
+            self.view.set_content_rect(rect)
+        else:
+            self.scene.setSceneRect(rect)  # 强制场景大小等于当前帧
 
         # 如果有棋盘格，同步它的大小
         if hasattr(self.view, "checker_item") and self.view.checker_item:
@@ -483,7 +494,7 @@ class ManualEditor(QWidget, EditorUI):
                         target_folder, f"{bundle.name}_{i:02d}.png"
                     )
                     f.pixmap.save(save_path, "PNG")
-        except Exception as e:
+        except Exception:
             # 保存失败时暂时不打印调试信息
             pass
 
@@ -564,9 +575,10 @@ class ManualEditor(QWidget, EditorUI):
 
             if not first_pix.isNull():
                 new_rect = QRectF(0, 0, first_pix.width(), first_pix.height())
-                self.scene.setSceneRect(new_rect)
-
-                # 初始化棋盘格背景
+                if hasattr(self.view, "set_content_rect"):
+                    self.view.set_content_rect(new_rect)
+                else:
+                    self.scene.setSceneRect(new_rect)
                 self.view.checker_item = CheckerboardItem(new_rect)
                 self.scene.addItem(self.view.checker_item)
                 self.view.checker_item.setZValue(-10)  # 确保在最底层
@@ -580,8 +592,14 @@ class ManualEditor(QWidget, EditorUI):
                     # 显式调用一次渲染，确保画布出现图像
                     self.switch_frame_preview(0)
 
-                # 自动缩放以适应视口
-                self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+                # 自动缩放以适应视口（如果用户已经手动平移，则不再自动居中）
+                if (
+                    not hasattr(self.view, "has_user_panned")
+                    or not self.view.has_user_panned()
+                ):
+                    self.view.fitInView(new_rect, Qt.AspectRatioMode.KeepAspectRatio)
+                    if hasattr(self.view, "reset_pan_state"):
+                        self.view.reset_pan_state()
 
         # 8. 同步外部面板（AssetTree 等）
         self.bundle_updated.emit(self.current_bundle, {})
@@ -835,7 +853,10 @@ class ManualEditor(QWidget, EditorUI):
 
         # 同步更新场景和棋盘格（防止撤销的是裁切操作导致尺寸不对）
         new_rect = QRectF(0, 0, last_pixmap.width(), last_pixmap.height())
-        self.scene.setSceneRect(new_rect)
+        if hasattr(self.view, "set_content_rect"):
+            self.view.set_content_rect(new_rect)
+        else:
+            self.scene.setSceneRect(new_rect)
         if hasattr(self.view, "checker_item") and self.view.checker_item:
             self.view.checker_item.set_rect(new_rect)
 
@@ -909,6 +930,9 @@ class ManualEditor(QWidget, EditorUI):
 
             if mode == ToolMode.MAGIC_WAND:
                 if event.type() == QEvent.MouseButtonPress:
+                    # 中键用于视图平移，不参与魔棒操作
+                    if event.button() == Qt.MiddleButton:
+                        return False
                     self.handle_magic_wand_click(scene_pos)
                     return True
 
@@ -916,6 +940,8 @@ class ManualEditor(QWidget, EditorUI):
             if mode == ToolMode.RECT_SELECT:
                 # 鼠标单击事件：交给 SelectionManager 处理，并且拦截掉让 View 自己处理
                 if event.type() == QEvent.MouseButtonPress:
+                    if event.button() == Qt.MiddleButton:
+                        return False
                     self.selection_manager.handle_mouse_press(event, scene_pos)
                     return True  # 拦截，不给 View 内部平移逻辑机会
 
@@ -926,10 +952,15 @@ class ManualEditor(QWidget, EditorUI):
                     return True
 
                 elif event.type() == QEvent.MouseMove:
+                    # 中键拖拽用于平移视图，不拦截
+                    if event.buttons() & Qt.MiddleButton:
+                        return False
                     self.selection_manager.handle_mouse_move(event, scene_pos)
                     return True
 
                 elif event.type() == QEvent.MouseButtonRelease:
+                    if event.button() == Qt.MiddleButton:
+                        return False
                     self.selection_manager.handle_mouse_release(event, scene_pos)
                     return True
             if mode == ToolMode.CROP:
@@ -1035,7 +1066,10 @@ class ManualEditor(QWidget, EditorUI):
 
         # 4. 更新画布范围和棋盘格
         new_rect = QRectF(new_pixmap.rect())
-        self.scene.setSceneRect(new_rect)
+        if hasattr(self.view, "set_content_rect"):
+            self.view.set_content_rect(new_rect)
+        else:
+            self.scene.setSceneRect(new_rect)
         if hasattr(self.view, "checker_item"):
             self.view.checker_item.set_rect(new_rect)
 

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QAbstractItemView,
 )
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 
 
@@ -203,12 +203,6 @@ class AssetTree(QTreeWidget):
                     bundle.segments[idx]["start"] = s
                     bundle.segments[idx]["end"] = e
 
-            # 3. 打印模型状态验证 (使用 ID 匹配标记)
-            status_list = [
-                f"{'*' if x is seg else ''}{x['name']}:{x['start']}-{x['end']}"
-                for x in bundle.segments
-            ]
-
             # 4. 反馈回 UI (阻塞信号防止重复触发)
             s_edit.blockSignals(True)
             e_edit.blockSignals(True)
@@ -295,7 +289,7 @@ class AssetTree(QTreeWidget):
                         # 强制把 UI 上的值刷进字典
                         seg["start"] = int(s_edit.text())
                         seg["end"] = int(e_edit.text())
-                    except:
+                    except:  # noqa: E722
                         pass
 
             # 发送信号给 PreviewPanel
