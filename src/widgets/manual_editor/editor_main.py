@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QListWidgetItem,
     QGraphicsView,
+    QToolTip,
+    QPushButton,
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
@@ -75,6 +77,20 @@ class ManualEditor(QWidget, EditorUI):
         self.frame_list.installEventFilter(self)
         # 同时也给视图加上，确保点击画布后也能响应
         self.view.installEventFilter(self)
+
+        btns = [
+            self.btn_new_file,
+            self.btn_save,
+            self.btn_magic_wand,
+            self.btn_pick,
+            self.btn_slice,
+            self.btn_cut,
+            self.btn_expand,
+            self.btn_shrink,
+            self.btn_invert,
+        ]
+        for btn in btns:
+            btn.installEventFilter(self)
 
     # --- 核心：数据驱动的属性拦截 ---
     @property
@@ -921,6 +937,27 @@ class ManualEditor(QWidget, EditorUI):
         super().keyPressEvent(event)
 
     def eventFilter(self, source, event):
+        # --- 0. 处理 ToolTip 事件 (解决位置和穿帮问题) ---
+        if event.type() == QEvent.ToolTip:
+            # 只有当事件源是按钮时才处理
+            if isinstance(source, QPushButton):
+                # 获取按钮在全球屏幕的位置
+                btn_rect = source.rect()
+                # mapToGlobal(btn_rect.bottomLeft()) 得到左下角
+                global_pos = source.mapToGlobal(btn_rect.bottomLeft())
+
+                # 稍微向上微调 Y，让它稍微盖住按钮边缘一点点，或者紧贴
+                # 如果你的工具栏在顶部，+2 是向下移；如果感觉远，就尝试 -2 或 0
+                global_pos.setY(global_pos.y() - 35)
+                # 也可以微调 X，让它往右挪一点
+                global_pos.setX(global_pos.x() + 2)
+
+                tip_text = source.toolTip()
+                if tip_text:
+                    QToolTip.showText(global_pos, tip_text, source)
+
+                    return True
+
         # --- 1. 处理鼠标事件 (解决选区不触发的核心) ---
         if source == self.view.viewport():
             mode = self.current_tool_mode
