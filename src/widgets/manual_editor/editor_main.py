@@ -281,12 +281,12 @@ class ManualEditor(QWidget, EditorUI):
         if self.current_bundle:
             # 物理清空并重新填充 Bundle 的 frames
             self.current_bundle.frames = []
-            for i, f in enumerate(new_frames_data):
+            for i, f in enumerate(new_frames_data, start=1):
                 # 将字典数据包装回 FrameData 对象
                 frame_obj = FrameData(
                     pixmap=f["pixmap"],
                     rect=f.get("rect", QRectF()),
-                    name=f"{self.current_bundle.name}_{i}",
+                    name=f"{self.current_bundle.name}_{i:02d}",
                 )
                 self.current_bundle.frames.append(frame_obj)
 
@@ -468,8 +468,20 @@ class ManualEditor(QWidget, EditorUI):
                 target_folder = os.path.join(parent_dir, bundle.name)
                 os.makedirs(target_folder, exist_ok=True)
 
-                for i, f in enumerate(bundle.frames):
-                    save_path = os.path.join(target_folder, f"frame_{i:03d}.png")
+                # 先清理旧的序列帧文件，避免残留旧的 frame_000 / 旧的命名格式
+                for old in os.listdir(target_folder):
+                    if (
+                        old.startswith("frame_") or old.startswith(f"{bundle.name}_")
+                    ) and old.lower().endswith(".png"):
+                        try:
+                            os.remove(os.path.join(target_folder, old))
+                        except Exception:
+                            pass
+
+                for i, f in enumerate(bundle.frames, start=1):
+                    save_path = os.path.join(
+                        target_folder, f"{bundle.name}_{i:02d}.png"
+                    )
                     f.pixmap.save(save_path, "PNG")
                 print(f"DEBUG [Save]: 序列帧已更新至目录: {target_folder}")
         except Exception as e:

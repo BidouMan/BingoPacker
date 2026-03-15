@@ -5,10 +5,9 @@ import time
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QPointF, QBuffer, QIODevice
 from PySide6.QtGui import QPixmap, QPainter
-from PIL import Image
 
 from .asset_manager import AssetManager
-from .asset_model import FrameData
+
 
 class SliceLogic:
     # ==========================================
@@ -17,9 +16,13 @@ class SliceLogic:
     def on_slice_clicked(self):
         manager = AssetManager()
         asset_names = manager.list_assets()
-        target_bundles = [manager.get_asset(n) for n in asset_names 
-                         if manager.get_asset(n) and len(manager.get_asset(n).frames) == 1 
-                         and not manager.get_asset(n).is_memory]
+        target_bundles = [
+            manager.get_asset(n)
+            for n in asset_names
+            if manager.get_asset(n)
+            and len(manager.get_asset(n).frames) == 1
+            and not manager.get_asset(n).is_memory
+        ]
 
         if not target_bundles:
             self.add_log("⚠️ 仓库中没有符合裁切条件的单帧资源", "#f38ba8")
@@ -28,17 +31,17 @@ class SliceLogic:
         total_assets = len(target_bundles)
         # 用于存放任务执行中的日志，最后统一打印
         summary_logs = []
-        
+
         # 1. 打印标题
         self.add_log("-> 智能裁切", "#a6e3a1")
-        
+
         # 2. 初始进度条占位
         self.update_fixed_bar(0, is_init=True)
 
         for i, bundle in enumerate(target_bundles):
             start_p = (i / total_assets) * 100
             end_p = ((i + 1) / total_assets) * 100
-            
+
             # --- 3. 模拟滑行动画 ---
             steps = 10
             for step in range(1, steps + 1):
@@ -54,14 +57,19 @@ class SliceLogic:
                     # 物理保存与数据更新
                     output_dir = os.path.join(os.path.dirname(bundle.path), bundle.name)
                     self._physical_save_to_disk(output_dir, bundle.name, sliced_pixmaps)
-                    
+
                     # 关键：暂存日志，不立即打印
-                    summary_logs.append((f"-> {bundle.name} 裁切完成: {len(sliced_pixmaps)} 帧", "#89b4fa"))
-                
+                    summary_logs.append(
+                        (
+                            f"-> {bundle.name} 裁切完成: {len(sliced_pixmaps)} 帧",
+                            "#89b4fa",
+                        )
+                    )
+
                 # 更新当前进度条到阶段满额 (原地替换)
                 self.update_fixed_bar(end_p, is_init=False)
                 QApplication.processEvents()
-                
+
             except Exception as e:
                 summary_logs.append((f"-> 错误 [{bundle.name}]: {str(e)}", "#f38ba8"))
                 self.update_fixed_bar(end_p, is_init=False)
@@ -69,13 +77,13 @@ class SliceLogic:
         # --- 4. 任务全部结束后的操作 ---
         # 此时进度条已到 100%，且就在“智能裁切”下方
         self.add_log("-> 处理完成", "#a6e3a1")
-        
+
         # 5. 最后统一打印汇总结果
         for msg, color in summary_logs:
             self.add_log(msg, color)
 
         # 刷新 UI 树
-        if hasattr(self.preview_panel.asset_tree, 'refresh_from_manager'):
+        if hasattr(self.preview_panel.asset_tree, "refresh_from_manager"):
             self.preview_panel.asset_tree.refresh_from_manager()
 
     # ==========================================
@@ -88,60 +96,80 @@ class SliceLogic:
         with open(img_path, "rb") as f:
             file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
             src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
-        if src is None: return []
+        if src is None:
+            return []
 
-        alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        alpha = (
+            src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        )
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         closed = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+        contours, _ = cv2.findContours(
+            closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
         rects = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            if w < 2 or h < 2: continue
-            roi = alpha[y:y+h, x:x+w]
+            if w < 2 or h < 2:
+                continue
+            roi = alpha[y : y + h, x : x + w]
             pts = cv2.findNonZero(roi)
             if pts is not None:
                 ix, iy, iw, ih = cv2.boundingRect(pts)
                 rects.append([x + ix, y + iy, iw, ih])
 
-        if not rects: return []
+        if not rects:
+            return []
 
         # 动态行排序逻辑
-        rects.sort(key=lambda r: (r[1] + r[3]/2))
+        rects.sort(key=lambda r: r[1] + r[3] / 2)
         avg_h = sum(r[3] for r in rects) / len(rects)
         row_limit = avg_h * 0.6
         final_rects, current_row = [], []
-        last_y = rects[0][1] + rects[0][3]/2
+        last_y = rects[0][1] + rects[0][3] / 2
 
         for r in rects:
-            if abs((r[1] + r[3]/2) - last_y) < row_limit:
+            if abs((r[1] + r[3] / 2) - last_y) < row_limit:
                 current_row.append(r)
             else:
                 current_row.sort(key=lambda x: x[0])
                 final_rects.extend(current_row)
-                current_row, last_y = [r], (r[1] + r[3]/2)
+                current_row, last_y = [r], (r[1] + r[3] / 2)
         current_row.sort(key=lambda x: x[0])
         final_rects.extend(current_row)
 
         # 画布居中与导出逻辑
-        max_dim = max(max(r[2] for r in final_rects), max(r[3] for r in final_rects)) + 20
+        max_dim = (
+            max(max(r[2] for r in final_rects), max(r[3] for r in final_rects)) + 20
+        )
         side = max_dim + (1 if max_dim % 2 != 0 else 0)
-        
+
         pix_list = []
         full_pix = QPixmap(img_path)
         for x, y, w, h in final_rects:
             canvas = QPixmap(side, side)
             canvas.fill(Qt.GlobalColor.transparent)
             p = QPainter(canvas)
-            p.drawPixmap((side - w) // 2, max(0, side - h - 4), full_pix.copy(x, y, w, h))
+            p.drawPixmap(
+                (side - w) // 2, max(0, side - h - 4), full_pix.copy(x, y, w, h)
+            )
             p.end()
             pix_list.append(canvas)
         return pix_list
 
     def _physical_save_to_disk(self, output_dir, name_base, pixmaps):
         os.makedirs(output_dir, exist_ok=True)
-        for idx, pix in enumerate(pixmaps):
+
+        # 先清理旧的裁切结果，避免残留旧编号文件
+        for old in os.listdir(output_dir):
+            if old.startswith(f"{name_base}_") and old.lower().endswith(".png"):
+                try:
+                    os.remove(os.path.join(output_dir, old))
+                except Exception:
+                    pass
+
+        for idx, pix in enumerate(pixmaps, start=1):
             pix.save(os.path.join(output_dir, f"{name_base}_{idx:02d}.png"), "PNG")
 
     # ==========================================
@@ -156,8 +184,9 @@ class SliceLogic:
         max_w = max(r.width() for r in selection_rects)
         max_h = max(r.height() for r in selection_rects)
         side = max(max_w, max_h) + 8
-        
-        if side % 2 != 0: side += 1
+
+        if side % 2 != 0:
+            side += 1
 
         for rect in selection_rects:
             canvas = QPixmap(side, side)
@@ -166,7 +195,9 @@ class SliceLogic:
             ox, oy = (side - rect.width()) // 2, max(0, side - rect.height() - 4)
             painter.drawPixmap(ox, oy, full_pixmap.copy(rect))
             painter.end()
-            frames_data.append({"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy)})
+            frames_data.append(
+                {"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy)}
+            )
         return frames_data
 
     # logic_slice.py 补全后的方法
@@ -181,41 +212,51 @@ class SliceLogic:
         q_pixmap.save(buffer, "PNG")
         file_bytes = np.frombuffer(buffer.data(), dtype=np.uint8)
         src = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
-        
-        if src is None: return []
-        
+
+        if src is None:
+            return []
+
         # 2. 复用 OpenCV 识别逻辑 (闭运算 + 轮廓提取)
-        alpha = src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-        gap_threshold = 3 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_threshold, gap_threshold))
+        alpha = (
+            src[:, :, 3] if src.shape[2] == 4 else cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        )
+        gap_threshold = 3
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT, (gap_threshold, gap_threshold)
+        )
         closed_alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(closed_alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+        contours, _ = cv2.findContours(
+            closed_alpha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
         raw_rects = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            if w < 2 or h < 2: continue
-            roi_alpha = alpha[y:y+h, x:x+w]
+            if w < 2 or h < 2:
+                continue
+            roi_alpha = alpha[y : y + h, x : x + w]
             coords = cv2.findNonZero(roi_alpha)
             if coords is not None:
                 ix, iy, iw, ih = cv2.boundingRect(coords)
                 # 存为 QRect 格式
                 from PySide6.QtCore import QRect
+
                 raw_rects.append(QRect(x + ix, y + iy, iw, ih))
 
-        if not raw_rects: return []
+        if not raw_rects:
+            return []
 
         # 3. 行排序逻辑
-        raw_rects.sort(key=lambda r: (r.y() + r.height()/2))
-        
+        raw_rects.sort(key=lambda r: r.y() + r.height() / 2)
+
         final_sorted_rects = []
         current_row = []
         avg_h = sum(r.height() for r in raw_rects) / len(raw_rects)
         row_threshold = avg_h * 0.6
-        
-        last_center_y = raw_rects[0].y() + raw_rects[0].height()/2
+
+        last_center_y = raw_rects[0].y() + raw_rects[0].height() / 2
         for r in raw_rects:
-            curr_center_y = r.y() + r.height()/2
+            curr_center_y = r.y() + r.height() / 2
             if abs(curr_center_y - last_center_y) < row_threshold:
                 current_row.append(r)
             else:
@@ -228,7 +269,7 @@ class SliceLogic:
 
         # 4. 生成统一格式的预览数据
         # 构造一个模拟对象以适配 run_manual_slice 的参数要求
-        mock_bg_item = type('obj', (object,), {'pixmap': lambda: q_pixmap})
+        mock_bg_item = type("obj", (object,), {"pixmap": lambda: q_pixmap})
         return self.run_manual_slice(mock_bg_item, final_sorted_rects)
 
     def update_fixed_bar(self, percent, is_init=False):
@@ -236,6 +277,6 @@ class SliceLogic:
         filled_count = int(bar_width * (percent / 100))
         bar_content = "━" * filled_count + "─" * (bar_width - filled_count)
         progress_text = f"-> {bar_content} [{percent:>6.1f}%]"
-        
+
         # 只有第一次调用时 replace_last 为 False，之后全部原地替换最后一行
         self.add_log(progress_text, "#74c7ec", replace_last=not is_init)

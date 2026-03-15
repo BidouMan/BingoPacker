@@ -135,10 +135,10 @@ class AssetManager:
         bundle.is_memory = True
         bundle.original_pixmap = original_pix
 
-        for i, pix in enumerate(pixmap_list):
+        for i, pix in enumerate(pixmap_list, start=1):
             f_name = (
-                frame_names[i]
-                if frame_names and i < len(frame_names)
+                frame_names[i - 1]
+                if frame_names and i - 1 < len(frame_names)
                 else f"{name}_{i:02d}"
             )
             bundle.frames.append(FrameData(pix, pix.rect(), f_name))
