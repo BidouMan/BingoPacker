@@ -115,10 +115,13 @@ class EditorUI:
         mw_layout.setContentsMargins(0, 0, 0, 0)
         mw_layout.setSpacing(4)
 
-        # 新增按钮也遵循全局 QPushButton 样式（自动撑开尺寸）
-        self.btn_expand = QPushButton("扩")
-        self.btn_shrink = QPushButton("缩")
-        self.btn_invert = QPushButton("反")
+        # 新增按钮也遵循全局 QPushButton 样式（自动撑开尺寸） 3/2
+        self.btn_expand = self._create_tool_btn("btn_expand", "保存")
+        self.btn_shrink = self._create_tool_btn("btn_shrink", "保存")
+        self.btn_invert = self._create_tool_btn("btn_invert", "保存")
+        # self.btn_expand = QPushButton("扩")
+        # self.btn_shrink = QPushButton("缩")
+        # self.btn_invert = QPushButton("反")
 
         # 容差滑动条与百分比
         mw_layout.addWidget(QLabel("容差"))
