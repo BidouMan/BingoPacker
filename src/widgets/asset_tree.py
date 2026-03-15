@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
+from ..utils import get_resource_path
 
 
 class AssetTree(QTreeWidget):
@@ -65,7 +66,7 @@ class AssetTree(QTreeWidget):
 
         if not bundle.segments:
             # 初始时 start=1, end=总帧数
-            bundle.segments = [{"name": "Default", "start": 1, "end": total_frames}]
+            bundle.segments = [{"name": "动画", "start": 1, "end": total_frames}]
 
         for seg in bundle.segments:
             self._add_segment_node(root, seg)
@@ -92,7 +93,8 @@ class AssetTree(QTreeWidget):
         btn_add.setObjectName("AssetActionBtn")
         btn_add.setFixedSize(22, 22)
         btn_add.setCursor(Qt.PointingHandCursor)
-        btn_add.setIcon(QIcon(os.path.join("assets", "icons", "btn_add.svg")))
+        icon_path = get_resource_path(os.path.join("assets", "icons", "btn_add.svg"))
+        btn_add.setIcon(QIcon(icon_path))
         btn_add.clicked.connect(lambda: self.on_add_segment_clicked(item))
 
         layout.addWidget(dot)

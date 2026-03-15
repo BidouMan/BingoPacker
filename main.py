@@ -1,5 +1,12 @@
 import sys
 from PySide6.QtWidgets import QApplication
+from PySide6 import QtSvg  # noqa: F401
+from PySide6 import QtSvgWidgets  # noqa: F401
+import os
+
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_AUTOSCREENSCALEFACTOR"] = "1"
+
 
 # 导入我们 src 里的逻辑
 from src.utils import lock_environment

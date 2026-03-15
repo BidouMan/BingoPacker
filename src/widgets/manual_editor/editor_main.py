@@ -260,7 +260,7 @@ class ManualEditor(QWidget, EditorUI):
 
         # 2. 确保有默认片段
         if not self.current_bundle.segments:
-            self.current_bundle.segments = [{"name": "Default", "start": 1, "end": 1}]
+            self.current_bundle.segments = [{"name": "动画", "start": 1, "end": 1}]
 
         # 3. 寻找主窗口并同步
         target = self.parent()
@@ -274,6 +274,8 @@ class ManualEditor(QWidget, EditorUI):
         """
         智能裁切逻辑：确保数据物理同步到 Bundle，并刷新 UI
         """
+        self.set_tool_mode(ToolMode.IDLE)
+        self._reset_tool_buttons()
         # 1. 寻找画布上的底图
         bg_item = next(
             (
@@ -321,7 +323,7 @@ class ManualEditor(QWidget, EditorUI):
             # 更新片段范围（Default 段落涵盖所有新帧）
             new_count = len(self.current_bundle.frames)
             for s in self.current_bundle.segments:
-                if s.get("name") == "Default":
+                if s.get("name") == "动画":
                     s["start"] = 1
                     s["end"] = new_count
 
@@ -342,6 +344,13 @@ class ManualEditor(QWidget, EditorUI):
         if self.current_bundle.frames:
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
+
+            # 只要更新了画布，强制居中一次。
+            # 如果想自动适配大小居中，用 fitInView
+            rect = self.preview_item.boundingRect()
+            self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+            if hasattr(self.view, "reset_pan_state"):
+                self.view.reset_pan_state()
 
         self.sync_and_notify()
 

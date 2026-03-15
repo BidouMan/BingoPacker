@@ -14,18 +14,28 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QEvent, QPoint, QObject
 from PySide6.QtGui import QIcon
 import os
+from ...utils import get_resource_path
+
+
+import platform
 
 
 class _ToolTipEventFilter(QObject):
-    """将 tooltip 定位到控件下方，避免默认位置有时偏离太远。"""
-
     def eventFilter(self, watched, event):
         if event.type() == QEvent.ToolTip:
             tip = watched.toolTip()
             if tip:
-                pos = watched.mapToGlobal(
-                    QPoint(watched.width() // 2, watched.height() + 4)
-                )
+                # 1. 基础偏移：y_offset 在 Mac 上 4 像素就够了
+                # 2. Windows 补偿：Windows 的 QToolTip 渲染逻辑和高 DPI 经常导致重叠或偏高
+                y_offset = 4
+                if platform.system() == "Windows":
+                    y_offset = 12  # 增加 Windows 下的垂直间距
+
+                # 获取按钮正下方的全局坐标
+                # 建议使用 rect().bottomCenter() 来获取更稳定的基准点
+                local_pos = QPoint(watched.width() // 2, watched.height() + y_offset)
+                pos = watched.mapToGlobal(local_pos)
+
                 QToolTip.showText(pos, tip, watched)
             return True
         return super().eventFilter(watched, event)
@@ -91,7 +101,7 @@ class EditorUI:
                 padding: 3px 5px;
 
                 /* 保证 tooltip 永远在最前面 */
-                z-index: 10000;
+            
             }
         """)
 
@@ -284,7 +294,8 @@ class EditorUI:
         # --- 核心逻辑：加载图标 ---
         # 假设你的图标文件名和传入的 name 一致 (比如 btn_save 对应 btn_save.svg)
         # 或者你也可以根据需要修改这里的映射关系
-        icon_path = os.path.join("assets", "icons", f"{name}.svg")
+        icon_rel_path = f"assets/icons/{name}.svg"
+        icon_path = get_resource_path(icon_rel_path)
 
         if os.path.exists(icon_path):
             btn.setIcon(QIcon(icon_path))

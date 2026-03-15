@@ -127,9 +127,7 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
         self.btn_upload = self.make_btn(" 导入", "#313244", "#89b4fa", "pick_folders")
         self.btn_clear = self.make_btn(" 清空", "#313244", "#89b4fa", "clear_all")
         self.btn_editor = self.make_btn(" 编辑", "#313244", "#89b4fa", "btn_editor")
-        self.btn_slice = self.make_btn(
-            " 裁切", "#313244", "#89b4fa", "on_slice_clicked"
-        )
+        self.btn_slice = self.make_btn(" 裁切", "#313244", "#89b4fa", "btn_slice")
 
         self.btn_bgs = self.make_btn("导出 .bgs", "#45b573", "#58ce87")
         self.btn_sprite = self.make_btn("导出 .sprite3", "#d9793d", "#e68a4d")
@@ -145,7 +143,8 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
     def make_btn(self, text, bg, hover, icon=None):
         btn = QPushButton(text)
         if icon:
-            path = get_resource_path(f"assets/icons/{icon}.svg")
+            relative_icon_path = f"assets/icons/{icon}.svg"
+            path = get_resource_path(relative_icon_path)
             if os.path.exists(path):
                 btn.setIcon(QIcon(path))
         btn.setStyleSheet(

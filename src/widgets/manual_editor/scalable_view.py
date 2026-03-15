@@ -164,23 +164,43 @@ class ScalableView(QGraphicsView):
         self._update_scene_rect_for_panning()
 
     def wheelEvent(self, event):
-        """缩放逻辑必须在 View 层级"""
-        # 1. 确保锚点设置正确 (这是 QGraphicsView 的方法)
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # 1. 获取当前鼠标在视图中的位置 (Viewport Pos)
+        viewport_pos = event.position()
 
+        # 2. 获取当前鼠标在场景中的位置 (Scene Pos)
+        # 这一步至关重要，它是我们要“对齐”的锚点
+        scene_pos = self.mapToScene(viewport_pos.toPoint())
+
+        # 3. 计算缩放系数
         zoom_in_factor = 1.25
         zoom_out_factor = 1 / zoom_in_factor
 
-        # 2. 执行缩放
         if event.angleDelta().y() > 0:
-            self.scale(zoom_in_factor, zoom_in_factor)
+            zoom_factor = zoom_in_factor
         else:
-            self.scale(zoom_out_factor, zoom_out_factor)
+            zoom_factor = zoom_out_factor
 
-        # 3. 缩放后刷新 sceneRect，保持可拖动范围
-        self._update_scene_rect_for_panning()
+        # 4. 执行缩放
+        self.scale(zoom_factor, zoom_factor)
 
-        # 4. 关键：接受事件，阻止它继续向上传递或向下分发给 Item
+        # 5. 【核心步骤】重新对齐
+        # 缩放后，原来的场景坐标 scene_pos 已经挪动了
+        # 我们通过 centerOn 让视图重新对准这个坐标
+        # 但 centerOn 默认是居中，我们需要的是它回到鼠标刚才的位置
+
+        # 获取缩放后，锚点在视图中的新位置
+        new_viewport_pos = self.mapFromScene(scene_pos)
+
+        # 计算偏移量：新旧视图位置的差值
+        delta = new_viewport_pos - viewport_pos.toPoint()
+
+        # 调整滚动条，抵消这个偏移量，实现“锚点不动”
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() + delta.x()
+        )
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta.y())
+
+        # 阻止事件继续传递
         event.accept()
 
     def mouseDoubleClickEvent(self, event):
