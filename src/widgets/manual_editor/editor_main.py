@@ -1277,17 +1277,30 @@ class ManualEditor(QWidget, EditorUI):
 
         if old_mode == ToolMode.RECT_SELECT:
             self.selection_manager.active = False
-            self.selection_manager.abort_selection()  # 确保临时虚线框消失
+            self.selection_manager.abort_selection()
 
         elif old_mode == ToolMode.MAGIC_WAND:
             self.deselect_all()
-            # 如果有魔棒选区遮罩，看需求决定是否清理
 
         elif old_mode == ToolMode.CROP:
-            # 如果用户正在裁切时点别的工具，视为取消裁切
             if hasattr(self, "crop_box") and self.crop_box:
+                # 1. 物理移除裁切框图元
                 self.scene.removeItem(self.crop_box)
                 self.crop_box = None
+
+                # 2. 【核心修复】强制刷新
+                # 使用 scene().update() 通知场景重绘
+                # 这样之前 crop_tool 绘制的半透明深色遮罩就会被彻底擦除
+                self.scene.update()
+
+                # 3. 如果还是有极少数残留，使用这行“终极刷新”：
+                # self.view.viewport().update()
+
+        # 确保鼠标状态恢复
+        self.view.viewport().setCursor(Qt.ArrowCursor)
+        # 如果还是有残影，可以使用下面这行更强力的刷新：
+        # self.view.viewport().update()
+        # --- 修复逻辑结束 ---
 
     def _activate_new_tool(self, mode):
         if mode == ToolMode.RECT_SELECT:

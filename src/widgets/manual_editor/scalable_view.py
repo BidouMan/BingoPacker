@@ -172,7 +172,7 @@ class ScalableView(QGraphicsView):
         scene_pos = self.mapToScene(viewport_pos.toPoint())
 
         # 3. 计算缩放系数
-        zoom_in_factor = 1.25
+        zoom_in_factor = 1.1
         zoom_out_factor = 1 / zoom_in_factor
 
         if event.angleDelta().y() > 0:
@@ -185,8 +185,7 @@ class ScalableView(QGraphicsView):
 
         # 5. 【核心步骤】重新对齐
         # 缩放后，原来的场景坐标 scene_pos 已经挪动了
-        # 我们通过 centerOn 让视图重新对准这个坐标
-        # 但 centerOn 默认是居中，我们需要的是它回到鼠标刚才的位置
+        # 我们通过调整滚动条让视图重新对准这个坐标
 
         # 获取缩放后，锚点在视图中的新位置
         new_viewport_pos = self.mapFromScene(scene_pos)
@@ -199,6 +198,9 @@ class ScalableView(QGraphicsView):
             self.horizontalScrollBar().value() + delta.x()
         )
         self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta.y())
+
+        # 6. 确保场景矩形适合当前视图
+        self._update_scene_rect_for_panning()
 
         # 阻止事件继续传递
         event.accept()
@@ -252,7 +254,16 @@ class ScalableView(QGraphicsView):
 
         # 只有在需要时才设置（避免频繁触发 scroll 更新）
         if self.sceneRect() != padded:
+            # 保存当前滚动条位置
+            h_value = self.horizontalScrollBar().value()
+            v_value = self.verticalScrollBar().value()
+            
+            # 设置新的场景矩形
             self.setSceneRect(padded)
+            
+            # 恢复滚动条位置，避免画布突然跳动
+            self.horizontalScrollBar().setValue(h_value)
+            self.verticalScrollBar().setValue(v_value)
 
     def set_content_rect(self, rect: QRectF):
         """设置当前内容（如图片）的边界，并更新 sceneRect 以支持平移。"""

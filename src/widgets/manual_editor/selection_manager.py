@@ -518,6 +518,34 @@ class SelectionManager:
     #     self.scene.update()
 
     def handle_mouse_release(self, event, scene_pos):
+        # 处理移动模式的释放事件
+        if self.moving_item and self.last_move_pos is not None:
+            # 移动完成后，合并选区到背景并同步数据
+            if (
+                hasattr(self.moving_item, "pix_overlay")
+                and self.moving_item.pix_overlay
+            ):
+                # 寻找 Editor 实例
+                view = self.scene.views()[0]
+                editor = view.parent()
+                while editor and not hasattr(editor, "bundle_updated"):
+                    editor = editor.parent()
+
+                if editor:
+                    # 获取当前帧索引
+                    idx = editor.frame_list.currentRow()
+                    if 0 <= idx < len(editor.current_bundle.frames):
+                        # 合并选区到当前帧
+                        self._merge_back_to_bg(
+                            self.moving_item,
+                            target_frame_data=editor.current_bundle.frames[idx],
+                        )
+                        # 清除选区
+                        self.clear_selections()
+            self.moving_item = None
+            self.last_move_pos = None
+            return
+
         if self.temp_rect is None:
             return
 

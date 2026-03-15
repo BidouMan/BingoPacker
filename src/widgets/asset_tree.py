@@ -85,8 +85,25 @@ class AssetTree(QTreeWidget):
         dot = QLabel("●")
         dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
 
+        # 导入AssetManager
+        from ..asset_manager import AssetManager
+        
+        # 名称修改回调：更新bundle.name并同步到AssetManager
+        def update_bundle_name(new_name):
+            old_name = bundle.name
+            # 更新bundle.name
+            bundle.name = new_name
+            # 更新AssetManager中的存储键
+            manager = AssetManager()
+            if old_name in manager._storage:
+                # 移除旧键
+                del manager._storage[old_name]
+                # 使用新键重新注册
+                manager.register_asset(bundle, auto_rename=False)
+            return new_name
+        
         name_stack = self._create_name_editor(
-            bundle.name, 140, lambda n: setattr(bundle, "name", n)
+            bundle.name, 140, update_bundle_name
         )
 
         btn_add = QPushButton()
