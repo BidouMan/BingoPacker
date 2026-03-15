@@ -167,7 +167,7 @@ class AssetManager:
                 self.register_asset(bundle)
                 return bundle
         except Exception as e:
-            print(f"DEBUG [AssetManager]: 加载失败 {path} -> {str(e)}")
+            # 加载失败时暂不打印调试信息
             return None
 
     # --- 内部私有适配器 ---

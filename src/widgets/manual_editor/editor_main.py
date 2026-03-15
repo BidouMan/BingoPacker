@@ -462,7 +462,6 @@ class ManualEditor(QWidget, EditorUI):
             # 单帧模式：直接覆盖
             if len(bundle.frames) == 1:
                 bundle.frames[0].pixmap.save(bundle.path, "PNG")
-                print(f"DEBUG [Save]: 单帧原图已物理覆盖: {bundle.path}")
             else:
                 # 多帧模式：创建同名文件夹
                 parent_dir = os.path.dirname(bundle.path)
@@ -484,9 +483,9 @@ class ManualEditor(QWidget, EditorUI):
                         target_folder, f"{bundle.name}_{i:02d}.png"
                     )
                     f.pixmap.save(save_path, "PNG")
-                print(f"DEBUG [Save]: 序列帧已更新至目录: {target_folder}")
         except Exception as e:
-            print(f"DEBUG [Save]: 磁盘保存崩溃: {e}")
+            # 保存失败时暂时不打印调试信息
+            pass
 
     def clear_all(self):
         """完全清空编辑器状态并重置全局环境"""
@@ -988,7 +987,6 @@ class ManualEditor(QWidget, EditorUI):
                     item.setIcon(QIcon(icon_pix))
 
         self.view.update()
-        print("DEBUG [Sync]: UI 已全局刷新")
 
     # -----------------------------------------------------------------
     # 在 editor_main.py 的 ManualEditor 类中添加
