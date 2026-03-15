@@ -34,6 +34,8 @@ class EditorUI:
                 color: #ffffff;
                 /* 确保文字和图片有足够的间距 */
                 padding: 2px; 
+                /* 强制内容居中 */
+                text-align: center;
             }
             QListWidget::item:selected { 
                 background-color: #3e4451; 
@@ -151,7 +153,8 @@ class EditorUI:
         self.frame_list.setResizeMode(QListWidget.Adjust)
         self.frame_list.setMovement(QListWidget.Static)
         self.frame_list.setIconSize(QSize(48, 48))
-        self.frame_list.setGridSize(QSize(74, 78))
+        # 使 Item 占满整个列表宽度，消除右侧留白（隐藏滚动条后会看到空白）
+        self.frame_list.setGridSize(QSize(82, 80))
         self.frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_list.verticalScrollBar().setFixedWidth(0)

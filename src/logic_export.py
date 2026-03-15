@@ -2,7 +2,6 @@ import os
 import json
 import zipfile
 import hashlib
-from PySide6.QtGui import QPixmap
 from PySide6.QtCore import QBuffer, QIODevice
 from .asset_manager import AssetManager
 

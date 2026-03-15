@@ -211,7 +211,8 @@ class ManualEditor(QWidget, EditorUI):
         item = QListWidgetItem()
         item.setIcon(QIcon(canvas))
         item.setText(os.path.basename(file_path))
-        item.setSizeHint(QSize(78, 80))
+        # 让 item 占满列表宽度，以避免列表右侧出现空白
+        item.setSizeHint(QSize(self.frame_list.width(), 80))
         item.setTextAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom
         )
