@@ -526,9 +526,22 @@ class ManualEditor(QWidget, EditorUI):
             return
 
         try:
-            # 单帧模式：直接覆盖
+            # 单帧模式：检查名称是否变更
             if len(bundle.frames) == 1:
-                bundle.frames[0].pixmap.save(bundle.path, "PNG")
+                # 获取当前文件名
+                current_filename = os.path.basename(bundle.path)
+                current_name_without_ext = os.path.splitext(current_filename)[0]
+
+                # 如果名称变更了，创建新文件
+                if current_name_without_ext != bundle.name:
+                    parent_dir = os.path.dirname(bundle.path)
+                    new_path = os.path.join(parent_dir, f"{bundle.name}.png")
+                    bundle.frames[0].pixmap.save(new_path, "PNG")
+                    # 更新bundle.path为新路径
+                    bundle.path = new_path
+                else:
+                    # 名称未变更，直接覆盖
+                    bundle.frames[0].pixmap.save(bundle.path, "PNG")
             else:
                 # 多帧模式：创建同名文件夹
                 parent_dir = os.path.dirname(bundle.path)
@@ -1217,6 +1230,26 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_magic_wand.blockSignals(False)
         self.btn_cut.blockSignals(False)
 
+    def abort_crop_session(self):
+        """取消裁切会话，清理裁切框并恢复正常状态"""
+        if hasattr(self, "crop_box") and self.crop_box:
+            # 从场景中移除裁切框
+            if self.crop_box.scene():
+                self.crop_box.scene().removeItem(self.crop_box)
+            # 清除引用
+            self.crop_box = None
+        # 重置工具模式
+        self.set_tool_mode(ToolMode.IDLE)
+        # 重置工具按钮状态
+        self._reset_tool_buttons()
+        # 刷新视图
+        self.view.update()
+        # 强制刷新场景
+        if self.scene:
+            self.scene.update()
+        # 强制重绘整个窗口
+        self.update()
+
     def update_status_bar(self):
         """同步底部所有标签的信息"""
         if not self.current_bundle:
@@ -1277,30 +1310,17 @@ class ManualEditor(QWidget, EditorUI):
 
         if old_mode == ToolMode.RECT_SELECT:
             self.selection_manager.active = False
-            self.selection_manager.abort_selection()
+            self.selection_manager.abort_selection()  # 确保临时虚线框消失
 
         elif old_mode == ToolMode.MAGIC_WAND:
             self.deselect_all()
+            # 如果有魔棒选区遮罩，看需求决定是否清理
 
         elif old_mode == ToolMode.CROP:
+            # 如果用户正在裁切时点别的工具，视为取消裁切
             if hasattr(self, "crop_box") and self.crop_box:
-                # 1. 物理移除裁切框图元
                 self.scene.removeItem(self.crop_box)
                 self.crop_box = None
-
-                # 2. 【核心修复】强制刷新
-                # 使用 scene().update() 通知场景重绘
-                # 这样之前 crop_tool 绘制的半透明深色遮罩就会被彻底擦除
-                self.scene.update()
-
-                # 3. 如果还是有极少数残留，使用这行“终极刷新”：
-                # self.view.viewport().update()
-
-        # 确保鼠标状态恢复
-        self.view.viewport().setCursor(Qt.ArrowCursor)
-        # 如果还是有残影，可以使用下面这行更强力的刷新：
-        # self.view.viewport().update()
-        # --- 修复逻辑结束 ---
 
     def _activate_new_tool(self, mode):
         if mode == ToolMode.RECT_SELECT:
@@ -1315,9 +1335,22 @@ class ManualEditor(QWidget, EditorUI):
                 self.set_tool_mode(ToolMode.IDLE)
                 return
 
+            # 检查是否有用户选区
+            crop_rect = target.boundingRect()
+            if hasattr(self, "selection_manager") and self.selection_manager.selections:
+                # 如果只有一个选区，使用它作为裁切范围
+                if len(self.selection_manager.selections) == 1:
+                    selection_item = self.selection_manager.selections[0]
+                    # 获取选区在场景中的矩形
+                    scene_rect = selection_item.sceneBoundingRect()
+                    # 转换到底图图元的局部坐标系
+                    local_rect = target.mapFromScene(scene_rect).boundingRect()
+                    crop_rect = local_rect
+                    # 清理选区
+                    self.selection_manager.clear_selections()
+
             # 1. 搬家后的写法：直接将裁切框设为底图的子项 (parent_item=target)
-            # 初始矩形直接使用底图的范围
-            self.crop_box = CropBoxItem(target.boundingRect(), parent_item=target)
+            self.crop_box = CropBoxItem(crop_rect, parent_item=target)
 
             # 2. 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)
