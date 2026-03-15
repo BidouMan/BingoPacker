@@ -99,7 +99,10 @@ class AssetTree(QTreeWidget):
                 # 移除旧键
                 del manager._storage[old_name]
                 # 使用新键重新注册
-                manager.register_asset(bundle, auto_rename=False)
+                # 先确保bundle.name确实是新名称
+                bundle.name = new_name
+                # 注册到AssetManager
+                manager._storage[new_name] = bundle
             return new_name
         
         name_stack = self._create_name_editor(

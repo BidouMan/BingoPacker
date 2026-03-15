@@ -197,7 +197,14 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
                 hasattr(self.editor_page, "current_bundle")
                 and self.editor_page.current_bundle
             ):
+                # 直接使用current_bundle.name，确保使用最新的名称
                 target = self.editor_page.current_bundle.name
+                # 确保AssetManager中存在这个资源
+                from .asset_manager import AssetManager
+                manager = AssetManager()
+                if target not in manager._storage and self.editor_page.current_bundle:
+                    # 如果不存在，重新注册
+                    manager._storage[target] = self.editor_page.current_bundle
 
         # 显式传递 target。如果是 Console 模式，target 就是 None
         self.on_export_bgs(target_name=target)
@@ -209,7 +216,14 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
                 hasattr(self.editor_page, "current_bundle")
                 and self.editor_page.current_bundle
             ):
+                # 直接使用current_bundle.name，确保使用最新的名称
                 target = self.editor_page.current_bundle.name
+                # 确保AssetManager中存在这个资源
+                from .asset_manager import AssetManager
+                manager = AssetManager()
+                if target not in manager._storage and self.editor_page.current_bundle:
+                    # 如果不存在，重新注册
+                    manager._storage[target] = self.editor_page.current_bundle
         self.on_export_sprite3(target_name=target)
 
     def on_clear_content(self):
