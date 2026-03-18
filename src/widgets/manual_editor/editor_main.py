@@ -74,6 +74,19 @@ class ManualEditor(QWidget, EditorUI):
 
         self.connect_signals()
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+
+        path = urls[0].toLocalFile()
+        # 处理拖入的文件或文件夹
+        self.display_image(path)
+
         self.frame_list.installEventFilter(self)
         # 同时也给视图加上，确保点击画布后也能响应
         self.view.installEventFilter(self)
@@ -152,6 +165,142 @@ class ManualEditor(QWidget, EditorUI):
         # 同步更新魔棒工具类里的 tolerance
         self.magic_wand.tolerance = value
 
+    def display_folder(self, folder_path):
+        """加载文件夹作为序列帧"""
+        import os
+        import re
+        from PySide6.QtGui import QPixmap
+
+        # 1. 扫描文件夹内的图片文件
+        valid_exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
+
+        # 自然排序逻辑
+        files.sort(
+            key=lambda x: [
+                int(c) if c.isdigit() else c for c in re.split("([0-9]+)", x)
+            ]
+        )
+
+        if not files:
+            return
+
+        # 2. 模型层处理
+        folder_name = os.path.basename(folder_path.rstrip(os.sep))
+        self.current_bundle = AssetBundle(folder_name)
+        self.current_bundle.path = folder_path
+        self.current_bundle.is_memory = False
+
+        # 加载所有帧
+        for f_name in files:
+            full_path = os.path.join(folder_path, f_name)
+            pix = QPixmap(full_path)
+            if not pix.isNull():
+                self.current_bundle.frames.append(FrameData(pix, pix.rect(), f_name))
+
+        if self.current_bundle.frames:
+            # 设置默认片段
+            self.current_bundle.segments = [
+                {
+                    "name": "All Frames",
+                    "start": 1,
+                    "end": len(self.current_bundle.frames),
+                }
+            ]
+            # 设置原始pixmap为第一帧
+            self.current_bundle.original_pixmap = self.current_bundle.frames[0].pixmap
+
+        self.asset_manager.register_asset(self.current_bundle)
+
+        # 3. UI 状态重置
+        self.current_source_path = folder_path
+        self.frame_list.blockSignals(True)
+
+        # 清理场景
+        self.scene.clear()
+        self.preview_item = None
+        self.frame_list.clear()
+        self.current_frames = []
+
+        # 4. 同步current_frames
+        for frame in self.current_bundle.frames:
+            self.current_frames.append({"pixmap": frame.pixmap})
+
+        # 5. 初始化画布（使用第一帧）
+        if self.current_bundle.frames:
+            first_frame = self.current_bundle.frames[0]
+            first_pix = first_frame.pixmap
+
+            # 画布渲染
+            rect = QRectF(0, 0, first_pix.width(), first_pix.height())
+            self.view.checker_item = CheckerboardItem(rect)
+            self.scene.addItem(self.view.checker_item)
+
+            self.preview_item = QGraphicsPixmapItem(first_pix)
+            self.preview_item.setTransformationMode(
+                Qt.TransformationMode.FastTransformation
+            )
+            self.scene.addItem(self.preview_item)
+
+            # 让 view 负责管理 sceneRect
+            if hasattr(self.view, "set_content_rect"):
+                self.view.set_content_rect(rect)
+            else:
+                self.scene.setSceneRect(rect)
+
+            # 初次加载时，将视图缩放到合适大小
+            self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+            if hasattr(self.view, "reset_pan_state"):
+                self.view.reset_pan_state()
+
+        # 6. 左侧列表：渲染所有帧
+        icon_area = 45
+        for i, frame_data in enumerate(self.current_bundle.frames):
+            pix = frame_data.pixmap
+            display_index = i + 1
+
+            # 生成缩略图
+            canvas = QPixmap(icon_area, icon_area)
+            canvas.fill(Qt.GlobalColor.transparent)
+            thumb = pix.scaled(
+                icon_area,
+                icon_area,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+            painter = QPainter(canvas)
+            painter.drawPixmap(
+                (icon_area - thumb.width()) // 2,
+                (icon_area - thumb.height()) // 2,
+                thumb,
+            )
+            painter.end()
+
+            item = QListWidgetItem(f"帧 {display_index:02d}")
+            item.setSizeHint(QSize(self.frame_list.width(), 80))
+            item.setIcon(QIcon(canvas))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.frame_list.addItem(item)
+
+        self.frame_list.blockSignals(False)
+        self.frame_list.setCurrentRow(0)
+
+        # 7. 同步到全局预览
+        if self.current_bundle.frames:
+            first_pix = self.current_bundle.frames[0].pixmap
+            # 直接同步到全局预览，不调用 _sync_to_global_preview 以避免覆盖 segments
+            target = self.parent()
+            while target and target.__class__.__name__ != "BingoPacker":
+                target = target.parent()
+
+            if target and self.current_bundle.segments:
+                # 传入第一个片段，确保自动开始播放动画
+                target.on_editor_bundle_changed(
+                    self.current_bundle, self.current_bundle.segments[0]
+                )
+
+        self.update_status_bar()  # 刷新状态栏显示
+
     def display_image(self, file_path):
         """加载新资源并重置所有编辑器状态"""
         self.undo_stack.clear()
@@ -176,6 +325,11 @@ class ManualEditor(QWidget, EditorUI):
             self.btn_cut.blockSignals(False)
 
         if not os.path.exists(file_path):
+            return
+
+        # 检查是否为文件夹
+        if os.path.isdir(file_path):
+            self.display_folder(file_path)
             return
 
         self.update_selection_display(QRegion())

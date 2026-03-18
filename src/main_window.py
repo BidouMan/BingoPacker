@@ -271,9 +271,8 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
                 # 3. 通知编辑器（这里后面我们要改 ManualEditor 接收 bundle）
                 # self.editor_page.load_bundle(bundle)
 
-                # 临时兼容旧逻辑
-                if not os.path.isdir(path):
-                    self.editor_page.display_image(path)
+                # 临时兼容旧逻辑 - 移除目录检查，让 display_image 处理目录
+                self.editor_page.display_image(path)
 
                 self.add_log(f"-> 编辑器已重载素材: {bundle.name}", "#a6e3a1")
 

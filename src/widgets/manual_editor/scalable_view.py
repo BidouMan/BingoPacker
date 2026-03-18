@@ -1,3 +1,4 @@
+import os
 from PySide6.QtWidgets import QGraphicsView, QGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPoint
 from PySide6.QtGui import (
@@ -80,8 +81,8 @@ class ScalableView(QGraphicsView):
                 target.import_project_file(path)
                 event.acceptProposedAction()
 
-        elif ext.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
-            # 如果是单图，走原有逻辑
+        elif ext.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")) or os.path.isdir(path):
+            # 如果是单图或文件夹，走原有逻辑
             target.display_image(path)
             event.acceptProposedAction()
 
