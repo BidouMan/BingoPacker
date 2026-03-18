@@ -423,3 +423,7 @@ class PreviewPanel(QFrame):
 
         # 4. 更新按钮状态
         self.update_play_button_icon(False)
+        
+        # 5. 清空资源树
+        if hasattr(self, "asset_tree"):
+            self.asset_tree.clear()
