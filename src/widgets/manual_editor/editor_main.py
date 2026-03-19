@@ -473,7 +473,10 @@ class ManualEditor(QWidget, EditorUI):
         if not bg_item:
             return
 
-        # --- 第四阶段：执行裁切逻辑 ---
+        # --- 第四阶段：保存裁切前的状态 ---
+        self.save_undo_state()
+
+        # --- 第五阶段：执行裁切逻辑 ---
         new_frames_data = []
 
         if manual_selection_rects:
@@ -488,9 +491,6 @@ class ManualEditor(QWidget, EditorUI):
 
         if not new_frames_data:
             return
-
-        # --- 第五阶段：数据持久化与 UI 刷新 ---
-        self.save_undo_state()
 
         if self.current_bundle:
             self.current_bundle.frames = []
@@ -520,6 +520,12 @@ class ManualEditor(QWidget, EditorUI):
         if self.current_bundle and self.current_bundle.frames:
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
+
+            # 更新preview_item的pixmap为第一帧
+            if self.current_bundle.frames:
+                first_frame = self.current_bundle.frames[0]
+                if self.preview_item:
+                    self.preview_item.setPixmap(first_frame.pixmap)
 
             rect = self.preview_item.boundingRect()
             # 让视图自动缩放到合适大小展示切好的内容
@@ -1068,8 +1074,46 @@ class ManualEditor(QWidget, EditorUI):
         if current_pixmap.isNull():
             return
 
-        # 将当前图元的副本加入栈（必须用副本，防止引用干扰）
-        self.undo_stack.append(current_pixmap.copy())
+        # 保存完整的状态，包括current_bundle和current_frames
+        undo_state = {
+            "pixmap": current_pixmap.copy(),
+            "current_bundle": None,
+            "current_frames": [],
+            "current_frame_index": self.frame_list.currentRow(),
+        }
+
+        # 深拷贝current_bundle
+        if self.current_bundle:
+            from ...asset_model import AssetBundle, FrameData
+
+            undo_state["current_bundle"] = AssetBundle(self.current_bundle.name)
+            undo_state["current_bundle"].path = self.current_bundle.path
+            undo_state["current_bundle"].is_memory = self.current_bundle.is_memory
+            undo_state["current_bundle"].original_pixmap = (
+                self.current_bundle.original_pixmap.copy()
+                if self.current_bundle.original_pixmap
+                else None
+            )
+            undo_state["current_bundle"].segments = self.current_bundle.segments.copy()
+            # 深拷贝frames
+            undo_state["current_bundle"].frames = []
+            for frame in self.current_bundle.frames:
+                new_frame = FrameData(frame.pixmap.copy(), frame.rect, frame.name)
+                undo_state["current_bundle"].frames.append(new_frame)
+
+        # 深拷贝current_frames
+        if self.current_frames:
+            undo_state["current_frames"] = []
+            for frame in self.current_frames:
+                if isinstance(frame, dict):
+                    undo_state["current_frames"].append(
+                        {"pixmap": frame["pixmap"].copy()}
+                    )
+                elif hasattr(frame, "pixmap"):
+                    undo_state["current_frames"].append(frame)
+
+        # 将完整状态加入栈
+        self.undo_stack.append(undo_state)
 
         # 如果超过 20 次，弹出最旧的一个
         if len(self.undo_stack) > self.max_undo_steps:
@@ -1080,21 +1124,41 @@ class ManualEditor(QWidget, EditorUI):
         if not self.undo_stack:
             return
 
-        # 弹出最后一张图
-        last_pixmap = self.undo_stack.pop()
+        # 弹出最后一个完整状态
+        undo_state = self.undo_stack.pop()
 
         # 恢复图片
-        self.preview_item.setPixmap(last_pixmap)
+        self.preview_item.setPixmap(undo_state["pixmap"])
         self.preview_item.setPos(0, 0)
 
         # 同步更新场景和棋盘格（防止撤销的是裁切操作导致尺寸不对）
-        new_rect = QRectF(0, 0, last_pixmap.width(), last_pixmap.height())
+        new_rect = QRectF(
+            0, 0, undo_state["pixmap"].width(), undo_state["pixmap"].height()
+        )
         if hasattr(self.view, "set_content_rect"):
             self.view.set_content_rect(new_rect)
         else:
             self.scene.setSceneRect(new_rect)
         if hasattr(self.view, "checker_item") and self.view.checker_item:
             self.view.checker_item.set_rect(new_rect)
+
+        # 恢复current_bundle和current_frames
+        if undo_state["current_bundle"]:
+            self.current_bundle = undo_state["current_bundle"]
+        if undo_state["current_frames"]:
+            self.current_frames = undo_state["current_frames"]
+
+        # 更新左侧frame_list
+        self.frame_list.blockSignals(True)
+        self.frame_list.clear()
+        self.update_frame_list_ui()
+        # 恢复之前选中的帧
+        if 0 <= undo_state["current_frame_index"] < self.frame_list.count():
+            self.frame_list.setCurrentRow(undo_state["current_frame_index"])
+        self.frame_list.blockSignals(False)
+
+        # 同步到全局预览
+        self.sync_and_notify()
 
     def keyPressEvent(self, event):
         modifiers = event.modifiers()

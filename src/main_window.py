@@ -29,6 +29,23 @@ class BingoPacker(QMainWindow, ExportLogic, SliceLogic):
         self.setWindowTitle("Bingo Sprite Packer")
         # 考虑到常驻预览面板 (280px)，主窗口总宽度设为 1040 (760+280)
         self.setMinimumSize(1040, 620)
+        
+        # 设置窗口图标
+        from .utils import get_resource_path
+        import os
+        import sys
+        
+        # 根据平台选择合适的图标
+        if sys.platform == 'win32':
+            icon_path = get_resource_path("assets/icons/logo_win.ico")
+        elif sys.platform == 'darwin':
+            icon_path = get_resource_path("assets/icons/logo.icns")
+        else:
+            icon_path = get_resource_path("assets/icons/logo.png")
+        
+        if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+            self.setWindowIcon(QIcon(icon_path))
 
         # --- One Dark 风格配色方案 ---
         # 背景: #282c34 | 容器: #21252b | 边框: #3e4451

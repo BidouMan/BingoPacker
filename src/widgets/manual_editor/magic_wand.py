@@ -24,8 +24,9 @@ class MagicWandTool:
         arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
         target_pixel = arr[iy, ix].astype(np.int32)
 
-        # 2. 计算掩码 (RGB)
-        diff = np.abs(arr[:, :, :3].astype(np.int32) - target_pixel[:3])
+        # 2. 计算掩码 (RGB + Alpha)
+        # 考虑alpha通道，确保透明区域和非透明区域不会被一起选中
+        diff = np.abs(arr[:, :, :4].astype(np.int32) - target_pixel[:4])
         mask = np.all(diff <= self.tolerance, axis=2)
 
         # 3. 处理连通性

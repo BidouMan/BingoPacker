@@ -43,17 +43,22 @@ class _ToolTipEventFilter(QObject):
 
 class EditorUI:
     def setup_ui(self, widget: QWidget):
-        widget.setStyleSheet("""
-            QWidget { background-color: #282c34; color: #abb2bf; border: none; }
+        # 获取魔法棒选择图标的绝对路径
+        magic_wand_select_path = get_resource_path("assets/icons/magic_wand_select.svg")
+        # 确保路径中的反斜杠被正确转义
+        magic_wand_select_path = magic_wand_select_path.replace('\\', '/')
+        
+        widget.setStyleSheet(f"""
+            QWidget {{ background-color: #282c34; color: #abb2bf; border: none; }}
             
-            QListWidget { 
+            QListWidget {{ 
                 background-color: #21252b; 
                 border-right: 1px solid #181a1f; 
                 outline: none; 
                 padding: 0px; 
-            }
+            }}
             /* 强制 Item 内部边距 and 间距 */
-            QListWidget::item { 
+            QListWidget::item {{ 
                 background-color: #2c313a; 
                 border-radius: 4px; 
                 margin: 4px;
@@ -62,19 +67,19 @@ class EditorUI:
                 padding: 2px; 
                 /* 强制内容居中 */
                 text-align: center;
-            }
-            QListWidget::item:selected { 
+            }}
+            QListWidget::item:selected {{ 
                 background-color: #3e4451; 
                 border: 1px solid #61afef; 
-            }
-            QPushButton { background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }
-            QPushButton:hover { background-color: #3e4451; }
+            }}
+            QPushButton {{ background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }}
+            QPushButton:hover {{ background-color: #3e4451; }}
 
             /* --- 仅为新组件添加必要的样式，不触碰原有组件 --- */
-            QSlider::groove:horizontal { border: 1px solid #181a1f; height: 4px; background: #353b45; border-radius: 2px; }
-            QSlider::handle:horizontal { background: #89b4fa; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+            QSlider::groove:horizontal {{ border: 1px solid #181a1f; height: 4px; background: #353b45; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: #89b4fa; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }}
             
-            QCheckBox::indicator { 
+            QCheckBox::indicator {{ 
                 width: 14; 
                 height: 14; 
                 background-color: #353b45; 
@@ -82,19 +87,19 @@ class EditorUI:
                 border-radius: 3px; 
                 /* 核心：在默认状态就预留好 padding，防止切换时尺寸抖动 */
                 padding: 2px; 
-            }
+            }}
 
-            QCheckBox::indicator:hover { 
+            QCheckBox::indicator:hover {{ 
                 background-color: #3e4451; 
-            }
+            }}
 
             /* 2. 选中状态只改背景和图片，不改尺寸相关属性 */
-            QCheckBox::indicator:checked { 
+            QCheckBox::indicator:checked {{ 
                 background-color: #89b4fa; 
                 /* 引用你的 SVG */
-                image: url(assets/icons/magic_wand_select.svg);
-            }
-            QToolTip {
+                image: url({magic_wand_select_path});
+            }}
+            QToolTip {{
                 background-color: #21252b;
                 color: #abb2bf;
                 border: 1px solid #61afef;
@@ -102,12 +107,16 @@ class EditorUI:
 
                 /* 保证 tooltip 永远在最前面 */
             
-            }
+            }}
         """)
 
         tips = self.get_tool_configs()
 
-        layout = QVBoxLayout(widget)
+        # 检查widget是否已经有布局
+        if widget.layout() is None:
+            layout = QVBoxLayout(widget)
+        else:
+            layout = widget.layout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
