@@ -393,9 +393,6 @@ class SelectionManager:
         )
 
         if bg_item:
-            # DEBUG: 打印关键信息
-            print(f"DEBUG - bg_item pos: {bg_item.pos()}")
-            print(f"DEBUG - bg_item size: {bg_item.pixmap().size()}")
             bg_pos = bg_item.pos()
             bg_width = bg_item.pixmap().width()
             bg_height = bg_item.pixmap().height()
@@ -404,22 +401,9 @@ class SelectionManager:
             bg_right = bg_pos.x() + bg_width
             bg_bottom = bg_pos.y() + bg_height
 
-            print(f"DEBUG - target pos: {target.pos()}")
-            print(f"DEBUG - target rect: {target.boundingRect()}")
-            print(
-                f"DEBUG - item bounds: L={item_left}, T={item_top}, R={item_right}, B={item_bottom}"
-            )
-            print(
-                f"DEBUG - bg bounds: L={bg_left}, T={bg_top}, R={bg_right}, B={bg_bottom}"
-            )
-
-        print(f"DEBUG - clamped pos: ({new_x}, {new_y})")
-
         # 计算实际移动距离
         actual_dx = new_x - current_pos.x()
         actual_dy = new_y - current_pos.y()
-
-        print(f"DEBUG - actual move: ({actual_dx}, {actual_dy})")
 
         if actual_dx != 0 or actual_dy != 0:
             # 执行位移
@@ -444,21 +428,14 @@ class SelectionManager:
         try:
             # 1. 检查 item 是否有效
             if not item or not hasattr(item, "scene"):
-                print("DEBUG _merge_back_to_bg: Invalid item")
                 return
 
             # 2. 检查 item 是否还在场景中
             try:
                 if item.scene() is None:
-                    print("DEBUG _merge_back_to_bg: Item not in scene")
                     return
             except RuntimeError:
-                print("DEBUG _merge_back_to_bg: Item already destroyed")
                 return
-
-            print(
-                f"DEBUG _merge_back_to_bg: target_frame_data={target_frame_data}, frame_index={frame_index}"
-            )
 
             # 3. 寻找场景中的底图图元
             # 增加条件：必须是可见的 (isVisible)！这样就不会抓到裁切后隐藏的原始大图
@@ -475,16 +452,13 @@ class SelectionManager:
                     None,
                 )
             except RuntimeError:
-                print("DEBUG _merge_back_to_bg: Error accessing scene items")
                 return
 
             if not bg_item:
-                print("DEBUG _merge_back_to_bg: No bg_item found")
                 return
 
             # 4. 检查 pix_overlay 是否存在
             if not hasattr(item, "pix_overlay") or not item.pix_overlay:
-                print("DEBUG _merge_back_to_bg: No pix_overlay found")
                 return
 
             # 5. 获取位置和图像信息
@@ -501,11 +475,6 @@ class SelectionManager:
                 final_y = orig_rect.top() + offset.y()
                 local_pos = QPoint(int(final_x), int(final_y))
 
-                print(f"DEBUG _merge_back_to_bg: overlay_pix size={overlay_pix.size()}")
-                print(
-                    f"DEBUG _merge_back_to_bg: orig_rect={orig_rect}, offset={offset}, final_pos={local_pos}"
-                )
-
                 current_bg_pix = bg_item.pixmap()
                 bg_rect = current_bg_pix.rect()
                 overlay_rect = QRect(local_pos, overlay_pix.size())
@@ -516,7 +485,6 @@ class SelectionManager:
 
                 if intersection_rect.isNull():
                     # 如果没有交集，说明完全在画布外，不绘制任何内容
-                    print("DEBUG _merge_back_to_bg: No intersection, skipping")
                     return
 
                 # 7. 创建新画布（保持原始画布大小）
@@ -560,19 +528,12 @@ class SelectionManager:
                             if frame_index is not None
                             else editor.frame_list.currentRow()
                         )
-                        print(f"DEBUG _merge_back_to_bg: Using frame index={idx}")
 
                         # 更新 target_frame_data（如果提供）
                         if target_frame_data is not None:
                             if isinstance(target_frame_data, dict):
-                                print(
-                                    f"DEBUG _merge_back_to_bg: Updating dict target_frame_data"
-                                )
                                 target_frame_data["pixmap"] = new_bg_pix
                             elif hasattr(target_frame_data, "pixmap"):
-                                print(
-                                    f"DEBUG _merge_back_to_bg: Updating FrameData target_frame_data"
-                                )
                                 target_frame_data.pixmap = new_bg_pix
 
                         # 更新 editor.current_frames 中的对应帧
@@ -591,15 +552,14 @@ class SelectionManager:
 
                         # 触发编辑器同步到 AssetBundle 并通知预览面板
                         editor.sync_and_notify()
-                        print("DEBUG _merge_back_to_bg: Sync completed")
                 except Exception as e:
-                    print(f"DEBUG _merge_back_to_bg: Error during sync: {e}")
+                    pass
 
             except Exception as e:
-                print(f"DEBUG _merge_back_to_bg: Error during pixel operation: {e}")
+                pass
 
         except Exception as e:
-            print(f"DEBUG _merge_back_to_bg: Unexpected error: {e}")
+            pass
 
     def _sync_to_editor_model(self, new_pix):
         try:
@@ -906,9 +866,6 @@ class SelectionManager:
                     )
 
                     if bg_item:
-                        # DEBUG: 打印关键信息
-                        print(f"DEBUG - bg_item pos: {bg_item.pos()}")
-                        print(f"DEBUG - bg_item size: {bg_item.pixmap().size()}")
                         bg_pos = bg_item.pos()
                         bg_width = bg_item.pixmap().width()
                         bg_height = bg_item.pixmap().height()
@@ -917,24 +874,9 @@ class SelectionManager:
                         bg_right = bg_pos.x() + bg_width
                         bg_bottom = bg_pos.y() + bg_height
 
-                        print(f"DEBUG - moving_item pos: {self.moving_item.pos()}")
-                        print(
-                            f"DEBUG - moving_item rect: {self.moving_item.boundingRect()}"
-                        )
-                        print(
-                            f"DEBUG - item bounds: L={item_left}, T={item_top}, R={item_right}, B={item_bottom}"
-                        )
-                        print(
-                            f"DEBUG - bg bounds: L={bg_left}, T={bg_top}, R={bg_right}, B={bg_bottom}"
-                        )
-
-                    print(f"DEBUG - clamped pos: ({new_x}, {new_y})")
-
                     # 计算实际移动距离
                     actual_dx = new_x - current_pos.x()
                     actual_dy = new_y - current_pos.y()
-
-                    print(f"DEBUG - actual move: ({actual_dx}, {actual_dy})")
 
                     if actual_dx != 0 or actual_dy != 0:
                         # 执行位移

@@ -55,8 +55,8 @@ class ManualEditor(QWidget, EditorUI):
         self.undo_stack = []
         self.max_undo_steps = 20
         self.last_index = -1
-        # 当前帧ID跟踪
-        self.current_frame_id = None
+        # 当前帧索引跟踪
+        self.current_frame_index = -1
 
         self.selection_manager = SelectionManager(self.scene)
         # self.selection_manager = SelectionManager(self.scene)
@@ -281,12 +281,9 @@ class ManualEditor(QWidget, EditorUI):
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
 
-        # 设置当前帧ID
+        # 设置当前帧索引
         if self.current_bundle.frames:
-            self.current_frame_id = self.current_bundle.frames[0].frame_id
-            print(
-                f"DEBUG display_folder: Initial frame ID set to {self.current_frame_id}"
-            )
+            self.current_frame_index = 0
 
         # 7. 同步到全局预览
         if self.current_bundle.frames:
@@ -584,38 +581,36 @@ class ManualEditor(QWidget, EditorUI):
             return
 
         # 在显示新帧前，先保存当前帧的修改
-        if self.preview_item and self.current_bundle and self.current_frame_id:
+        if self.preview_item and self.current_bundle and self.current_frame_index >= 0:
             # 首先，检查是否有移动的选区需要合并
             if hasattr(self, "selection_manager") and self.selection_manager.selections:
-                # 找到当前显示的帧数据（通过唯一ID）
-                for i, frame in enumerate(self.current_bundle.frames):
-                    if frame.frame_id == self.current_frame_id:
-                        print(
-                            f"DEBUG switch_frame_preview: Merging selections to frame {i} with ID {self.current_frame_id}"
-                        )
-                        # 合并选区到当前帧
-                        self.selection_manager.clear_selections(frame_index=i)
-                        break
+                # 直接使用当前帧索引合并选区
+                self.selection_manager.clear_selections(
+                    frame_index=self.current_frame_index
+                )
 
             # 然后保存当前帧的最终状态
             current_pixmap = self.preview_item.pixmap()
-            # 找到当前显示的帧数据（通过唯一ID）
-            for i, frame in enumerate(self.current_bundle.frames):
-                if frame.frame_id == self.current_frame_id:
-                    print(
-                        f"DEBUG switch_frame_preview: Saving changes to frame {i} with ID {self.current_frame_id}"
-                    )
-                    # 更新bundle数据
-                    self.current_bundle.frames[i].pixmap = current_pixmap
-                    # 更新current_frames
-                    if hasattr(self, "current_frames") and 0 <= i < len(
-                        self.current_frames
+            # 直接使用当前帧索引更新数据
+            if 0 <= self.current_frame_index < len(self.current_bundle.frames):
+                # 更新bundle数据
+                self.current_bundle.frames[
+                    self.current_frame_index
+                ].pixmap = current_pixmap
+                # 更新current_frames
+                if hasattr(
+                    self, "current_frames"
+                ) and 0 <= self.current_frame_index < len(self.current_frames):
+                    if isinstance(self.current_frames[self.current_frame_index], dict):
+                        self.current_frames[self.current_frame_index]["pixmap"] = (
+                            current_pixmap
+                        )
+                    elif hasattr(
+                        self.current_frames[self.current_frame_index], "pixmap"
                     ):
-                        if isinstance(self.current_frames[i], dict):
-                            self.current_frames[i]["pixmap"] = current_pixmap
-                        elif hasattr(self.current_frames[i], "pixmap"):
-                            self.current_frames[i].pixmap = current_pixmap
-                    break
+                        self.current_frames[
+                            self.current_frame_index
+                        ].pixmap = current_pixmap
 
         # 获取当前帧数据（完全独立的图层）
         frame_data = self.current_bundle.frames[index]
@@ -648,11 +643,8 @@ class ManualEditor(QWidget, EditorUI):
         # 确保图像始终在 (0,0) 位置显示
         self.preview_item.setPos(0, 0)
 
-        # 更新当前帧ID
-        self.current_frame_id = frame_data.frame_id
-        print(
-            f"DEBUG switch_frame_preview: Current frame ID set to {self.current_frame_id}"
-        )
+        # 更新当前帧索引
+        self.current_frame_index = index
 
         # 刷新视图，防止旧残影
         self.view.update()

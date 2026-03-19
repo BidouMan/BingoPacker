@@ -9,7 +9,6 @@ class FrameData:
         self.pixmap = pixmap  # 裁切后的图像
         self.rect = rect      # 原始坐标信息 (x, y, w, h)
         self.name = name
-        self.frame_id = str(uuid.uuid4())  # 唯一帧ID
 
 class AssetBundle:
     """标准资源包模型"""
