@@ -200,7 +200,7 @@ class SelectionManager:
         self.scene.addItem(item)
         self.selections.append(item)
 
-    def handle_double_click(self, scene_pos):
+    def handle_double_click(self, scene_pos, frame_index=None):
         if not self.active:
             return
 
@@ -214,9 +214,9 @@ class SelectionManager:
         ]
 
         if clicked_selections:
-            self._remove_item(clicked_selections[0])
+            self._remove_item(clicked_selections[0], frame_index=frame_index)
         else:
-            self.clear_selections()
+            self.clear_selections(frame_index=frame_index)
 
             # 关键：手动清理双击产生的那个微小残留
             if self.temp_rect:
@@ -224,16 +224,25 @@ class SelectionManager:
                     self.scene.removeItem(self.temp_rect)
                 self.temp_rect = None
 
-    def clear_selections(self, target_frame_data=None):
-        """修复 3：清空时必须处理未焊回的像素"""
+    def clear_selections(
+        self, target_frame_data=None, merge_to_bg=True, frame_index=None
+    ):
+        """清空选区，可选是否合并到背景，可选目标帧索引"""
         if not self.selections:
             return
 
         for item in self.selections[:]:
-            # --- 关键：如果该选区已经抠了图，先焊回去再删 ---
-            if hasattr(item, "pix_overlay") and item.pix_overlay:
+            # --- 关键：只有提供了frame_index才合并到背景 ---
+            if (
+                merge_to_bg
+                and hasattr(item, "pix_overlay")
+                and item.pix_overlay
+                and frame_index is not None
+            ):
                 # 调用你已有的合并函数，把像素贴回底图的新位置
-                self._merge_back_to_bg(item, target_frame_data=target_frame_data)
+                self._merge_back_to_bg(
+                    item, target_frame_data=target_frame_data, frame_index=frame_index
+                )
 
             if item.scene():
                 self.scene.removeItem(item)
@@ -297,14 +306,14 @@ class SelectionManager:
 
         bg_item.setPixmap(new_pix)
 
-    def _remove_item(self, item):
+    def _remove_item(self, item, frame_index=None):
         """
         删除单个选区：确保在删除框之前，像素已经稳固地写回底图
         """
         if item in self.selections:
             # 1. 检查是否有移动过的像素贴图层
             if hasattr(item, "pix_overlay") and item.pix_overlay:
-                self._merge_back_to_bg(item)
+                self._merge_back_to_bg(item, frame_index=frame_index)
 
             # 2. 从管理列表移除
             self.selections.remove(item)
@@ -427,106 +436,170 @@ class SelectionManager:
             # 7. 强制刷新，解决部分机器上的残影问题
             self.scene.update()
 
-    def _merge_back_to_bg(self, item, target_frame_data=None):
+    def _merge_back_to_bg(self, item, target_frame_data=None, frame_index=None):
         """
         物理合并：将悬浮像素焊死到底图。
         修正：严格限制底图查找范围，防止抓取到已隐藏的原始素材。
         """
-        # 1. 寻找场景中的底图图元
-        # 增加条件：必须是可见的 (isVisible)！这样就不会抓到裁切后隐藏的原始大图
-        bg_item = next(
-            (
-                i
-                for i in self.scene.items()
-                if isinstance(i, QGraphicsPixmapItem)
-                and not hasattr(i, "is_clone")
-                and i.isVisible()
-            ),
-            None,
-        )
+        try:
+            # 1. 检查 item 是否有效
+            if not item or not hasattr(item, "scene"):
+                print("DEBUG _merge_back_to_bg: Invalid item")
+                return
 
-        if not bg_item:
-            return
+            # 2. 检查 item 是否还在场景中
+            try:
+                if item.scene() is None:
+                    print("DEBUG _merge_back_to_bg: Item not in scene")
+                    return
+            except RuntimeError:
+                print("DEBUG _merge_back_to_bg: Item already destroyed")
+                return
 
-        if not hasattr(item, "pix_overlay") or not item.pix_overlay:
-            return
+            print(
+                f"DEBUG _merge_back_to_bg: target_frame_data={target_frame_data}, frame_index={frame_index}"
+            )
 
-        # 2. 获取位置和图像信息
-        overlay = item.pix_overlay
-        overlay_pix = overlay.pixmap()
-        scene_pos = overlay.scenePos()
-        local_pos = bg_item.mapFromScene(scene_pos).toPoint()
+            # 3. 寻找场景中的底图图元
+            # 增加条件：必须是可见的 (isVisible)！这样就不会抓到裁切后隐藏的原始大图
+            bg_item = None
+            try:
+                bg_item = next(
+                    (
+                        i
+                        for i in self.scene.items()
+                        if isinstance(i, QGraphicsPixmapItem)
+                        and not hasattr(i, "is_clone")
+                        and i.isVisible()
+                    ),
+                    None,
+                )
+            except RuntimeError:
+                print("DEBUG _merge_back_to_bg: Error accessing scene items")
+                return
 
-        current_bg_pix = bg_item.pixmap()
-        bg_rect = current_bg_pix.rect()
-        overlay_rect = QRect(local_pos, overlay_pix.size())
+            if not bg_item:
+                print("DEBUG _merge_back_to_bg: No bg_item found")
+                return
 
-        # 3. 计算交集区域（只保留画布范围内的部分）
-        # 模拟PS效果：结束移动后，超出画布的部分删除
-        intersection_rect = bg_rect.intersected(overlay_rect)
+            # 4. 检查 pix_overlay 是否存在
+            if not hasattr(item, "pix_overlay") or not item.pix_overlay:
+                print("DEBUG _merge_back_to_bg: No pix_overlay found")
+                return
 
-        if intersection_rect.isNull():
-            # 如果没有交集，说明完全在画布外，不绘制任何内容
-            return
+            # 5. 获取位置和图像信息
+            overlay = item.pix_overlay
+            try:
+                overlay_pix = overlay.pixmap()
 
-        # 4. 创建新画布（保持原始画布大小）
-        new_bg_pix = QPixmap(current_bg_pix.size())
-        new_bg_pix.fill(Qt.GlobalColor.transparent)
+                # 获取选区的原始位置和位移量
+                orig_rect = item.data(10)  # 原始位置（QRect）
+                offset = item.data(1) or QPointF(0, 0)  # 累计位移量
 
-        painter = QPainter(new_bg_pix)
+                # 计算最终绘制位置：原始位置 + 位移量
+                final_x = orig_rect.left() + offset.x()
+                final_y = orig_rect.top() + offset.y()
+                local_pos = QPoint(int(final_x), int(final_y))
 
-        # 绘制原始背景图
-        painter.drawPixmap(0, 0, current_bg_pix)
+                print(f"DEBUG _merge_back_to_bg: overlay_pix size={overlay_pix.size()}")
+                print(
+                    f"DEBUG _merge_back_to_bg: orig_rect={orig_rect}, offset={offset}, final_pos={local_pos}"
+                )
 
-        # 计算覆盖图在背景图上的绘制位置
-        draw_pos = QPoint(
-            intersection_rect.left() - overlay_rect.left(),
-            intersection_rect.top() - overlay_rect.top(),
-        )
+                current_bg_pix = bg_item.pixmap()
+                bg_rect = current_bg_pix.rect()
+                overlay_rect = QRect(local_pos, overlay_pix.size())
 
-        # 只绘制交集区域的内容（超出画布的部分被裁剪）
-        painter.drawPixmap(
-            intersection_rect.topLeft(),
-            overlay_pix,
-            QRect(draw_pos, intersection_rect.size()),
-        )
-        painter.end()
+                # 6. 计算交集区域（只保留画布范围内的部分）
+                # 模拟PS效果：结束移动后，超出画布的部分删除
+                intersection_rect = bg_rect.intersected(overlay_rect)
 
-        # 5. 更新显示（保持原始位置）
-        bg_item.setPixmap(new_bg_pix)
-        bg_item.setData(99, new_bg_pix.copy())
+                if intersection_rect.isNull():
+                    # 如果没有交集，说明完全在画布外，不绘制任何内容
+                    print("DEBUG _merge_back_to_bg: No intersection, skipping")
+                    return
 
-        # --- 6. 寻找 Editor 实例进行数据同步 ---
-        view = self.scene.views()[0]
-        editor = view.parent()
-        while editor and not hasattr(editor, "bundle_updated"):
-            editor = editor.parent()
+                # 7. 创建新画布（保持原始画布大小）
+                new_bg_pix = QPixmap(current_bg_pix.size())
+                new_bg_pix.fill(Qt.GlobalColor.transparent)
 
-        if editor:
-            # 优先使用显式传入的 target_frame_data
-            if target_frame_data is not None:
-                if isinstance(target_frame_data, dict):
-                    target_frame_data["pixmap"] = new_bg_pix
-                elif hasattr(target_frame_data, "pixmap"):
-                    target_frame_data.pixmap = new_bg_pix
-            else:
-                # 否则使用当前选中的索引（注意：这里要确保 index 是切换前的 index）
-                idx = editor.frame_list.currentRow()
-                if 0 <= idx < len(editor.current_frames):
-                    if isinstance(editor.current_frames[idx], dict):
-                        editor.current_frames[idx]["pixmap"] = new_bg_pix
-                    elif hasattr(editor.current_frames[idx], "pixmap"):
-                        editor.current_frames[idx].pixmap = new_bg_pix
+                painter = QPainter(new_bg_pix)
 
-                # 同步更新 AssetBundle 数据
-                if editor.current_bundle and 0 <= idx < len(
-                    editor.current_bundle.frames
-                ):
-                    editor.current_bundle.frames[idx].pixmap = new_bg_pix
-                    editor.current_bundle.original_pixmap = new_bg_pix
+                # 绘制原始背景图
+                painter.drawPixmap(0, 0, current_bg_pix)
 
-            # 触发编辑器同步到 AssetBundle 并通知预览面板
-            editor.sync_and_notify()
+                # 计算覆盖图在背景图上的绘制位置
+                draw_pos = QPoint(
+                    intersection_rect.left() - overlay_rect.left(),
+                    intersection_rect.top() - overlay_rect.top(),
+                )
+
+                # 只绘制交集区域的内容（超出画布的部分被裁剪）
+                painter.drawPixmap(
+                    intersection_rect.topLeft(),
+                    overlay_pix,
+                    QRect(draw_pos, intersection_rect.size()),
+                )
+                painter.end()
+
+                # 8. 更新显示（保持原始位置）
+                bg_item.setPixmap(new_bg_pix)
+                bg_item.setData(99, new_bg_pix.copy())
+
+                # --- 9. 寻找 Editor 实例进行数据同步 ---
+                try:
+                    view = self.scene.views()[0]
+                    editor = view.parent()
+                    while editor and not hasattr(editor, "bundle_updated"):
+                        editor = editor.parent()
+
+                    if editor:
+                        # 确定要更新的帧索引
+                        idx = (
+                            frame_index
+                            if frame_index is not None
+                            else editor.frame_list.currentRow()
+                        )
+                        print(f"DEBUG _merge_back_to_bg: Using frame index={idx}")
+
+                        # 更新 target_frame_data（如果提供）
+                        if target_frame_data is not None:
+                            if isinstance(target_frame_data, dict):
+                                print(
+                                    f"DEBUG _merge_back_to_bg: Updating dict target_frame_data"
+                                )
+                                target_frame_data["pixmap"] = new_bg_pix
+                            elif hasattr(target_frame_data, "pixmap"):
+                                print(
+                                    f"DEBUG _merge_back_to_bg: Updating FrameData target_frame_data"
+                                )
+                                target_frame_data.pixmap = new_bg_pix
+
+                        # 更新 editor.current_frames 中的对应帧
+                        if 0 <= idx < len(editor.current_frames):
+                            if isinstance(editor.current_frames[idx], dict):
+                                editor.current_frames[idx]["pixmap"] = new_bg_pix
+                            elif hasattr(editor.current_frames[idx], "pixmap"):
+                                editor.current_frames[idx].pixmap = new_bg_pix
+
+                        # 同步更新 AssetBundle 数据
+                        if editor.current_bundle and 0 <= idx < len(
+                            editor.current_bundle.frames
+                        ):
+                            editor.current_bundle.frames[idx].pixmap = new_bg_pix
+                            editor.current_bundle.original_pixmap = new_bg_pix
+
+                        # 触发编辑器同步到 AssetBundle 并通知预览面板
+                        editor.sync_and_notify()
+                        print("DEBUG _merge_back_to_bg: Sync completed")
+                except Exception as e:
+                    print(f"DEBUG _merge_back_to_bg: Error during sync: {e}")
+
+            except Exception as e:
+                print(f"DEBUG _merge_back_to_bg: Error during pixel operation: {e}")
+
+        except Exception as e:
+            print(f"DEBUG _merge_back_to_bg: Unexpected error: {e}")
 
     def _sync_to_editor_model(self, new_pix):
         try:
@@ -651,28 +724,8 @@ class SelectionManager:
     def handle_mouse_release(self, event, scene_pos):
         # 处理移动模式的释放事件
         if self.moving_item and self.last_move_pos is not None:
-            # 移动完成后，合并选区到背景并同步数据
-            if (
-                hasattr(self.moving_item, "pix_overlay")
-                and self.moving_item.pix_overlay
-            ):
-                # 寻找 Editor 实例
-                view = self.scene.views()[0]
-                editor = view.parent()
-                while editor and not hasattr(editor, "bundle_updated"):
-                    editor = editor.parent()
-
-                if editor:
-                    # 获取当前帧索引
-                    idx = editor.frame_list.currentRow()
-                    if 0 <= idx < len(editor.current_bundle.frames):
-                        # 合并选区到当前帧
-                        self._merge_back_to_bg(
-                            self.moving_item,
-                            target_frame_data=editor.current_bundle.frames[idx],
-                        )
-                        # 清除选区
-                        self.clear_selections()
+            # 注意：不再在移动完成后立即合并像素到底图
+            # 只在用户明确清除选区时才合并
             self.moving_item = None
             self.last_move_pos = None
             return

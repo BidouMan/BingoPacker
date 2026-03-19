@@ -55,6 +55,8 @@ class ManualEditor(QWidget, EditorUI):
         self.undo_stack = []
         self.max_undo_steps = 20
         self.last_index = -1
+        # 当前帧ID跟踪
+        self.current_frame_id = None
 
         self.selection_manager = SelectionManager(self.scene)
         # self.selection_manager = SelectionManager(self.scene)
@@ -144,19 +146,13 @@ class ManualEditor(QWidget, EditorUI):
 
     def before_frame_changed(self, new_row):
         """
-        在真正切换显示之前，强制把旧帧的选区合并掉。
+        在真正切换显示之前，清空选区。
+        注意：修改保存逻辑已移到 switch_frame_preview 中
         """
+        # 清空选区，确保切换到新帧时不会有残留
         if hasattr(self, "selection_manager") and self.selection_manager.selections:
-            # 此时 self.frame_list.currentRow() 还是旧的索引
-            old_index = self.frame_list.currentRow()
-            # 确保旧帧的修改被保存
-            if 0 <= old_index < len(self.current_bundle.frames):
-                # 合并选区到旧帧
-                self.selection_manager.clear_selections(
-                    target_frame_data=self.current_bundle.frames[old_index]
-                )
-            else:
-                self.selection_manager.clear_selections()
+            # 不传递frame_index，让switch_frame_preview处理保存
+            self.selection_manager.clear_selections()
 
     def _on_tolerance_changed(self, value):
         """同步显示百分比并更新魔棒工具的内部容差值"""
@@ -284,6 +280,13 @@ class ManualEditor(QWidget, EditorUI):
 
         self.frame_list.blockSignals(False)
         self.frame_list.setCurrentRow(0)
+
+        # 设置当前帧ID
+        if self.current_bundle.frames:
+            self.current_frame_id = self.current_bundle.frames[0].frame_id
+            print(
+                f"DEBUG display_folder: Initial frame ID set to {self.current_frame_id}"
+            )
 
         # 7. 同步到全局预览
         if self.current_bundle.frames:
@@ -521,13 +524,9 @@ class ManualEditor(QWidget, EditorUI):
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
 
-            # 更新preview_item的pixmap为第一帧
-            if self.current_bundle.frames:
-                first_frame = self.current_bundle.frames[0]
-                if self.preview_item:
-                    self.preview_item.setPixmap(first_frame.pixmap)
-
-            rect = self.preview_item.boundingRect()
+            # 获取第一帧的矩形
+            first_frame = self.current_bundle.frames[0]
+            rect = QRectF(first_frame.pixmap.rect())
             # 让视图自动缩放到合适大小展示切好的内容
             self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
             if hasattr(self.view, "reset_pan_state"):
@@ -580,29 +579,49 @@ class ManualEditor(QWidget, EditorUI):
             self.frame_list.addItem(item)
 
     def switch_frame_preview(self, index):
-        """切换显示指定索引的帧数据"""
-        if index < 0 or index >= len(self.current_frames):
+        """切换显示指定索引的帧数据 - 重新设计为PS图层模式"""
+        if index < 0 or index >= len(self.current_bundle.frames):
             return
 
-        # 清理之前的选区，防止选区残留
-        self.deselect_all()
+        # 在显示新帧前，先保存当前帧的修改
+        if self.preview_item and self.current_bundle and self.current_frame_id:
+            # 首先，检查是否有移动的选区需要合并
+            if hasattr(self, "selection_manager") and self.selection_manager.selections:
+                # 找到当前显示的帧数据（通过唯一ID）
+                for i, frame in enumerate(self.current_bundle.frames):
+                    if frame.frame_id == self.current_frame_id:
+                        print(
+                            f"DEBUG switch_frame_preview: Merging selections to frame {i} with ID {self.current_frame_id}"
+                        )
+                        # 合并选区到当前帧
+                        self.selection_manager.clear_selections(frame_index=i)
+                        break
 
-        # 确保当前帧的修改已经保存
-        if self.selection_manager and self.selection_manager.selections:
-            self.selection_manager.clear_selections()
+            # 然后保存当前帧的最终状态
+            current_pixmap = self.preview_item.pixmap()
+            # 找到当前显示的帧数据（通过唯一ID）
+            for i, frame in enumerate(self.current_bundle.frames):
+                if frame.frame_id == self.current_frame_id:
+                    print(
+                        f"DEBUG switch_frame_preview: Saving changes to frame {i} with ID {self.current_frame_id}"
+                    )
+                    # 更新bundle数据
+                    self.current_bundle.frames[i].pixmap = current_pixmap
+                    # 更新current_frames
+                    if hasattr(self, "current_frames") and 0 <= i < len(
+                        self.current_frames
+                    ):
+                        if isinstance(self.current_frames[i], dict):
+                            self.current_frames[i]["pixmap"] = current_pixmap
+                        elif hasattr(self.current_frames[i], "pixmap"):
+                            self.current_frames[i].pixmap = current_pixmap
+                    break
 
-        data_item = self.current_frames[index]
-        # 确保拿到 Pixmap
-        pix = (
-            data_item.pixmap
-            if hasattr(data_item, "pixmap")
-            else data_item.get("pixmap")
-        )
+        # 获取当前帧数据（完全独立的图层）
+        frame_data = self.current_bundle.frames[index]
+        pix = frame_data.pixmap
 
-        if pix is None or pix.isNull():
-            return
-
-        # 确保预览 Item 存在
+        # 更新预览图
         if self.preview_item is None:
             self.preview_item = QGraphicsPixmapItem(pix)
             self.preview_item.setTransformationMode(
@@ -628,6 +647,12 @@ class ManualEditor(QWidget, EditorUI):
 
         # 确保图像始终在 (0,0) 位置显示
         self.preview_item.setPos(0, 0)
+
+        # 更新当前帧ID
+        self.current_frame_id = frame_data.frame_id
+        print(
+            f"DEBUG switch_frame_preview: Current frame ID set to {self.current_frame_id}"
+        )
 
         # 刷新视图，防止旧残影
         self.view.update()
@@ -940,8 +965,23 @@ class ManualEditor(QWidget, EditorUI):
             )  # 传入空选区会触发我们写好的清理逻辑
 
         # 2. 清理手动绘制的矩形选区 (SelectionManager)
+        # 在取消选区时合并选区到背景，确保修改被保存
         if hasattr(self, "selection_manager"):
-            self.selection_manager.clear_selections()
+            self.selection_manager.clear_selections(merge_to_bg=True)
+
+    def save_current_frame_changes(self, frame_index):
+        """手动保存当前帧的修改，模拟手动取消选区的效果"""
+        print(
+            f"DEBUG save_current_frame_changes: Saving changes for frame {frame_index}"
+        )
+
+        # 获取目标帧数据
+        target_frame = self.current_bundle.frames[frame_index]
+
+        # 合并选区到当前帧并清空，传递 frame_index 参数
+        self.selection_manager.clear_selections(
+            target_frame_data=target_frame, merge_to_bg=True, frame_index=frame_index
+        )
 
     def delete_selected_pixels(self):
         """核心功能：将选区内的像素变为透明"""
@@ -1269,7 +1309,11 @@ class ManualEditor(QWidget, EditorUI):
                 # --- 处理双击清空 ---
                 elif event.type() == QEvent.MouseButtonDblClick:
                     scene_pos = self.view.mapToScene(event.pos())
-                    self.selection_manager.handle_double_click(scene_pos)
+                    # 获取当前帧索引，确保合并到正确的帧
+                    current_index = self.frame_list.currentRow()
+                    self.selection_manager.handle_double_click(
+                        scene_pos, frame_index=current_index
+                    )
                     return True
 
                 elif event.type() == QEvent.MouseMove:
