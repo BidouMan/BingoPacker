@@ -286,6 +286,14 @@ class SelectionManager:
         # 2. 【核心修改】确保像素被抠出
         # 注意：_prepare_moving_pixels 内部必须处理好 bg_item 的查找
         if not hasattr(target, "pix_overlay") or target.pix_overlay is None:
+            # 第一次移动时保存undo状态
+            # 寻找Editor实例并调用save_undo_state
+            view = self.scene.views()[0]
+            editor = view.parent()
+            while editor and not hasattr(editor, "save_undo_state"):
+                editor = editor.parent()
+            if editor:
+                editor.save_undo_state()
             self._prepare_moving_pixels(target)
 
         # 3. 计算步长
@@ -693,6 +701,14 @@ class SelectionManager:
                     not hasattr(self.moving_item, "pix_overlay")
                     or self.moving_item.pix_overlay is None
                 ):
+                    # 第一次移动时保存undo状态
+                    # 寻找Editor实例并调用save_undo_state
+                    view = self.scene.views()[0]
+                    editor = view.parent()
+                    while editor and not hasattr(editor, "save_undo_state"):
+                        editor = editor.parent()
+                    if editor:
+                        editor.save_undo_state()
                     self._prepare_moving_pixels(self.moving_item)
 
                 # 核心：计算鼠标在场景中移动的绝对像素差
@@ -706,6 +722,20 @@ class SelectionManager:
                     # 记录累计位移量，用于后期焊死到底图
                     old_off = self.moving_item.data(1) or QPointF(0, 0)
                     self.moving_item.setData(1, old_off + QPointF(dx, dy))
+
+                    # 更新背景遮罩，确保底图上的空洞位置正确
+                    bg_item = next(
+                        (
+                            i
+                            for i in self.scene.items()
+                            if isinstance(i, QGraphicsPixmapItem)
+                            and not hasattr(i, "is_clone")
+                            and i.isVisible()
+                        ),
+                        None,
+                    )
+                    if bg_item:
+                        self._update_background_mask(bg_item)
 
                     # 关键：更新 last_move_pos 时要减去舍入误差，确保下一次计算精准
                     self.last_move_pos += QPointF(dx, dy)
