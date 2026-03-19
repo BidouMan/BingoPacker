@@ -73,36 +73,36 @@ class SelectionManager:
         """
         实时计算所有已移动选区的原始位置，并让背景图在那块区域变透明
         """
-        full_pix_size = bg_item.pixmap().size()
-        # 创建一个全显的 Region
-        mask_region = QRegion(
-            QRect(0, 0, full_pix_size.width(), full_pix_size.height())
-        )
+        original_pixmap = bg_item.pixmap()
+        if original_pixmap.isNull():
+            return
 
-        # 遍历所有选区，如果该选区已经被“移动”了（即有了 pix_overlay）
-        # 我们就把它的“原始坑位”从遮罩里减去
+        full_pix_size = original_pixmap.size()
+
+        # 创建一个新的pixmap作为结果
+        result_pixmap = QPixmap(full_pix_size)
+        result_pixmap.fill(Qt.transparent)
+
+        # 创建一个画家来绘制
+        p = QPainter(result_pixmap)
+
+        # 绘制原始图片
+        p.drawPixmap(0, 0, original_pixmap)
+
+        # 遍历所有选区，如果该选区已经被"移动"了（即有了 pix_overlay）
+        # 我们就在原始位置绘制透明区域
         for item in self.selections:
             orig_pos = item.data(10)  # 存储的是 QRect
             if orig_pos and hasattr(item, "pix_overlay"):
-                mask_region -= QRegion(orig_pos)
+                # 在原始位置绘制透明区域
+                p.setCompositionMode(QPainter.CompositionMode_Clear)
+                p.fillRect(orig_pos, Qt.transparent)
+                p.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-        # 生成遮罩位图
-        mask_bitmap = QBitmap(full_pix_size)
-        mask_bitmap.fill(Qt.GlobalColor.white)  # 默认全白（显示）
-
-        p = QPainter(mask_bitmap)
-        # 只在非遮罩区（被剪切走的地方）画黑，黑色在 Mask 中代表透明
-        p.setClipRegion(
-            QRegion(QRect(0, 0, full_pix_size.width(), full_pix_size.height()))
-            - mask_region
-        )
-        p.fillRect(
-            QRect(0, 0, full_pix_size.width(), full_pix_size.height()),
-            Qt.GlobalColor.black,
-        )
         p.end()
 
-        bg_item.setMask(mask_bitmap)
+        # 更新背景图
+        bg_item.setPixmap(result_pixmap)
 
     def _get_valid_selections(self):
         valid = []
@@ -307,7 +307,21 @@ class SelectionManager:
         curr_offset = target.data(1) or QPointF(0, 0)
         target.setData(1, curr_offset + QPointF(dx, dy))
 
-        # 6. 强制刷新，解决部分机器上的残影问题
+        # 6. 更新背景遮罩，确保底图上的空洞位置正确
+        bg_item = next(
+            (
+                i
+                for i in self.scene.items()
+                if isinstance(i, QGraphicsPixmapItem)
+                and not hasattr(i, "is_clone")
+                and i.isVisible()
+            ),
+            None,
+        )
+        if bg_item:
+            self._update_background_mask(bg_item)
+
+        # 7. 强制刷新，解决部分机器上的残影问题
         self.scene.update()
         # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
 

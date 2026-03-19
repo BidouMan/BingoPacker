@@ -164,6 +164,26 @@ class ScalableView(QGraphicsView):
         # 鼠标释放后更新 sceneRect，确保本次拖拽后的最新偏移仍可平移
         self._update_scene_rect_for_panning()
 
+    def keyPressEvent(self, event):
+        """处理键盘事件，确保在选区模式下方向键不会触发视图平移"""
+        modifiers = event.modifiers()
+        is_ctrl = bool(
+            modifiers
+            & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+        )
+        key = event.key()
+
+        # 如果是cmd+方向键，并且有selection_manager且处于活动状态
+        if is_ctrl and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            if hasattr(self, "selection_manager") and self.selection_manager.active:
+                is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+                self.selection_manager.handle_key_nudge(key, is_shift)
+                event.accept()
+                return
+
+        # 其他情况交给父类处理
+        super().keyPressEvent(event)
+
     def wheelEvent(self, event):
         # 1. 获取当前鼠标在视图中的位置 (Viewport Pos)
         viewport_pos = event.position()
