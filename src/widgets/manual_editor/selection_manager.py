@@ -1,8 +1,10 @@
+from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsRectItem,
     QGraphicsView,
     QGraphicsPixmapItem,
+    QGraphicsItem,
 )
 from PySide6.QtCore import Qt, QRectF, QPointF, QRect
 from PySide6.QtGui import (
@@ -15,6 +17,51 @@ from PySide6.QtGui import (
     QRegion,
     QIcon,
 )  # 确保 QPainter 在这里
+
+
+class ClippedPixmapItem(QGraphicsPixmapItem):
+    """自定义的裁剪图像项，实现实时裁剪效果"""
+
+    def __init__(self, pixmap, parent=None):
+        super().__init__(pixmap, parent)
+        self.bg_item = None  # 背景图项，用于获取画布边界
+
+    def set_bg_item(self, bg_item):
+        """设置背景图项，用于获取画布边界"""
+        self.bg_item = bg_item
+
+    def paint(self, painter, option, widget):
+        """重写paint方法，实现实时裁剪"""
+        if not self.bg_item:
+            super().paint(painter, option, widget)
+            return
+
+        # 获取背景图的边界（画布范围）
+        bg_rect = QRectF(self.bg_item.pos(), self.bg_item.pixmap().size())
+
+        # 获取当前项在场景中的边界
+        item_rect = self.sceneBoundingRect()
+
+        # 计算交集区域（只绘制画布范围内的部分）
+        intersection_rect = bg_rect.intersected(item_rect)
+
+        if intersection_rect.isNull():
+            # 如果没有交集，不绘制任何内容
+            return
+
+        # 计算绘制区域在pixmap中的位置
+        pixmap_rect = self.boundingRect()
+        draw_pos = QPointF(
+            intersection_rect.left() - item_rect.left(),
+            intersection_rect.top() - item_rect.top(),
+        )
+
+        # 只绘制交集区域
+        painter.drawPixmap(
+            intersection_rect.topLeft() - self.scenePos(),  # 使用scenePos()获取场景位置
+            self.pixmap(),
+            QRectF(draw_pos, intersection_rect.size()),
+        )
 
 
 class SelectionManager:
@@ -308,14 +355,23 @@ class SelectionManager:
         elif key == Qt.Key_Down:
             dy = step
 
-        # 4. 执行位移
-        target.moveBy(dx, dy)
+        # 计算移动后的位置
+        current_pos = target.pos()
+        new_x = current_pos.x() + dx
+        new_y = current_pos.y() + dy
 
-        # 5. 更新 Data(1) 累计位移量 (这对后续焊死/撤销逻辑很重要)
-        curr_offset = target.data(1) or QPointF(0, 0)
-        target.setData(1, curr_offset + QPointF(dx, dy))
+        # 获取目标对象的边界矩形
+        item_rect = target.boundingRect()
 
-        # 6. 更新背景遮罩，确保底图上的空洞位置正确
+        # 计算目标对象在场景中的边界
+        # 注意：boundingRect()返回的是相对于对象自身坐标系的矩形
+        # 所以需要加上对象的位置来得到场景坐标系中的实际边界
+        item_left = new_x + item_rect.left()
+        item_top = new_y + item_rect.top()
+        item_right = new_x + item_rect.right()
+        item_bottom = new_y + item_rect.bottom()
+
+        # 获取背景图作为画布边界（可选）
         bg_item = next(
             (
                 i
@@ -326,12 +382,50 @@ class SelectionManager:
             ),
             None,
         )
-        if bg_item:
-            self._update_background_mask(bg_item)
 
-        # 7. 强制刷新，解决部分机器上的残影问题
-        self.scene.update()
-        # 注意：绝对不要在这里调用 self._merge_back_to_bg(target) !!
+        if bg_item:
+            # DEBUG: 打印关键信息
+            print(f"DEBUG - bg_item pos: {bg_item.pos()}")
+            print(f"DEBUG - bg_item size: {bg_item.pixmap().size()}")
+            bg_pos = bg_item.pos()
+            bg_width = bg_item.pixmap().width()
+            bg_height = bg_item.pixmap().height()
+            bg_left = bg_pos.x()
+            bg_top = bg_pos.y()
+            bg_right = bg_pos.x() + bg_width
+            bg_bottom = bg_pos.y() + bg_height
+
+            print(f"DEBUG - target pos: {target.pos()}")
+            print(f"DEBUG - target rect: {target.boundingRect()}")
+            print(
+                f"DEBUG - item bounds: L={item_left}, T={item_top}, R={item_right}, B={item_bottom}"
+            )
+            print(
+                f"DEBUG - bg bounds: L={bg_left}, T={bg_top}, R={bg_right}, B={bg_bottom}"
+            )
+
+        print(f"DEBUG - clamped pos: ({new_x}, {new_y})")
+
+        # 计算实际移动距离
+        actual_dx = new_x - current_pos.x()
+        actual_dy = new_y - current_pos.y()
+
+        print(f"DEBUG - actual move: ({actual_dx}, {actual_dy})")
+
+        if actual_dx != 0 or actual_dy != 0:
+            # 执行位移
+            target.moveBy(actual_dx, actual_dy)
+
+            # 5. 更新 Data(1) 累计位移量 (这对后续焊死/撤销逻辑很重要)
+            curr_offset = target.data(1) or QPointF(0, 0)
+            target.setData(1, curr_offset + QPointF(actual_dx, actual_dy))
+
+            # 6. 更新背景遮罩，确保底图上的空洞位置正确
+            if bg_item:
+                self._update_background_mask(bg_item)
+
+            # 7. 强制刷新，解决部分机器上的残影问题
+            self.scene.update()
 
     def _merge_back_to_bg(self, item, target_frame_data=None):
         """
@@ -367,24 +461,39 @@ class SelectionManager:
         bg_rect = current_bg_pix.rect()
         overlay_rect = QRect(local_pos, overlay_pix.size())
 
-        # 3. 计算并集区域（处理越界）
-        combined_rect = bg_rect.united(overlay_rect)
+        # 3. 计算交集区域（只保留画布范围内的部分）
+        # 模拟PS效果：结束移动后，超出画布的部分删除
+        intersection_rect = bg_rect.intersected(overlay_rect)
 
-        # 4. 绘制新画布
-        new_bg_pix = QPixmap(combined_rect.size())
+        if intersection_rect.isNull():
+            # 如果没有交集，说明完全在画布外，不绘制任何内容
+            return
+
+        # 4. 创建新画布（保持原始画布大小）
+        new_bg_pix = QPixmap(current_bg_pix.size())
         new_bg_pix.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(new_bg_pix)
-        offset = -combined_rect.topLeft()
 
-        painter.drawPixmap(offset, current_bg_pix)
-        painter.drawPixmap(local_pos + offset, overlay_pix)
+        # 绘制原始背景图
+        painter.drawPixmap(0, 0, current_bg_pix)
+
+        # 计算覆盖图在背景图上的绘制位置
+        draw_pos = QPoint(
+            intersection_rect.left() - overlay_rect.left(),
+            intersection_rect.top() - overlay_rect.top(),
+        )
+
+        # 只绘制交集区域的内容（超出画布的部分被裁剪）
+        painter.drawPixmap(
+            intersection_rect.topLeft(),
+            overlay_pix,
+            QRect(draw_pos, intersection_rect.size()),
+        )
         painter.end()
 
-        # 5. 更新显示
-        new_scene_pos = bg_item.mapToScene(combined_rect.topLeft())
+        # 5. 更新显示（保持原始位置）
         bg_item.setPixmap(new_bg_pix)
-        bg_item.setPos(new_scene_pos)
         bg_item.setData(99, new_bg_pix.copy())
 
         # --- 6. 寻找 Editor 实例进行数据同步 ---
@@ -661,14 +770,13 @@ class SelectionManager:
         self._permanently_erase_pixels(bg_item, local_rect)
 
         # 3. 创建贴层并配置层级
-        overlay = QGraphicsPixmapItem(crop_pix)
+        overlay = ClippedPixmapItem(crop_pix)
         overlay.is_clone = True
         overlay.setParentItem(target_item)
+        overlay.set_bg_item(bg_item)  # 设置背景图项，用于实时裁剪
 
         # --- 核心修复开始 ---
         # 标记子物体强制在父物体（选框）之后（即下方）绘制
-        from PySide6.QtWidgets import QGraphicsItem
-
         overlay.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
 
         # 双重保险：设置 ZValue 为负
@@ -716,14 +824,23 @@ class SelectionManager:
                 dx, dy = round(delta.x()), round(delta.y())
 
                 if dx != 0 or dy != 0:
-                    # 直接移动父物体，子物体（图像）会由于父子坐标系锁定，自动完美同步
-                    self.moving_item.moveBy(dx, dy)
+                    # 计算移动后的位置
+                    current_pos = self.moving_item.pos()
+                    new_x = current_pos.x() + dx
+                    new_y = current_pos.y() + dy
 
-                    # 记录累计位移量，用于后期焊死到底图
-                    old_off = self.moving_item.data(1) or QPointF(0, 0)
-                    self.moving_item.setData(1, old_off + QPointF(dx, dy))
+                    # 获取目标对象的边界矩形
+                    item_rect = self.moving_item.boundingRect()
 
-                    # 更新背景遮罩，确保底图上的空洞位置正确
+                    # 计算目标对象在场景中的边界
+                    # 注意：boundingRect()返回的是相对于对象自身坐标系的矩形
+                    # 所以需要加上对象的位置来得到场景坐标系中的实际边界
+                    item_left = new_x + item_rect.left()
+                    item_top = new_y + item_rect.top()
+                    item_right = new_x + item_rect.right()
+                    item_bottom = new_y + item_rect.bottom()
+
+                    # 获取背景图作为画布边界（可选）
                     bg_item = next(
                         (
                             i
@@ -734,13 +851,55 @@ class SelectionManager:
                         ),
                         None,
                     )
-                    if bg_item:
-                        self._update_background_mask(bg_item)
 
-                    # 关键：更新 last_move_pos 时要减去舍入误差，确保下一次计算精准
-                    self.last_move_pos += QPointF(dx, dy)
-                    self.scene.update()
-                return
+                    if bg_item:
+                        # DEBUG: 打印关键信息
+                        print(f"DEBUG - bg_item pos: {bg_item.pos()}")
+                        print(f"DEBUG - bg_item size: {bg_item.pixmap().size()}")
+                        bg_pos = bg_item.pos()
+                        bg_width = bg_item.pixmap().width()
+                        bg_height = bg_item.pixmap().height()
+                        bg_left = bg_pos.x()
+                        bg_top = bg_pos.y()
+                        bg_right = bg_pos.x() + bg_width
+                        bg_bottom = bg_pos.y() + bg_height
+
+                        print(f"DEBUG - moving_item pos: {self.moving_item.pos()}")
+                        print(
+                            f"DEBUG - moving_item rect: {self.moving_item.boundingRect()}"
+                        )
+                        print(
+                            f"DEBUG - item bounds: L={item_left}, T={item_top}, R={item_right}, B={item_bottom}"
+                        )
+                        print(
+                            f"DEBUG - bg bounds: L={bg_left}, T={bg_top}, R={bg_right}, B={bg_bottom}"
+                        )
+
+                    print(f"DEBUG - clamped pos: ({new_x}, {new_y})")
+
+                    # 计算实际移动距离
+                    actual_dx = new_x - current_pos.x()
+                    actual_dy = new_y - current_pos.y()
+
+                    print(f"DEBUG - actual move: ({actual_dx}, {actual_dy})")
+
+                    if actual_dx != 0 or actual_dy != 0:
+                        # 执行位移
+                        self.moving_item.moveBy(actual_dx, actual_dy)
+
+                        # 记录累计位移量，用于后期焊死到底图
+                        old_off = self.moving_item.data(1) or QPointF(0, 0)
+                        self.moving_item.setData(
+                            1, old_off + QPointF(actual_dx, actual_dy)
+                        )
+
+                        # 更新背景遮罩，确保底图上的空洞位置正确
+                        if bg_item:
+                            self._update_background_mask(bg_item)
+
+                        # 关键：更新 last_move_pos 时要减去舍入误差，确保下一次计算精准
+                        self.last_move_pos += QPointF(actual_dx, actual_dy)
+                        self.scene.update()
 
         # --- 情况 B: 默认拉框模式 ---
         if self.temp_rect and is_left_button:
