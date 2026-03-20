@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QColor,
     QFont,
+    QPen,
 )
 
 from .editor_ui import EditorUI
@@ -89,15 +90,34 @@ class SliceCardWidget(QWidget):
         self.pixmap_label.setPixmap(canvas)
         layout.addWidget(self.pixmap_label)
 
-        # 创建开关样式的锁定按钮，放在图像内部右上角
-        self.lock_switch = QPushButton()
-        self.lock_switch.setFixedSize(40, 20)
-        self.lock_switch.setStyleSheet(self._get_lock_switch_style())
-        self.lock_switch.clicked.connect(self._toggle_lock)
+        # 创建方框样式的锁定按钮，放在图像内部右上角
+        self.lock_button = QPushButton()
+        self.lock_button.setFixedSize(16, 16)  # 适当增大大小
+        self.lock_button.setStyleSheet(self._get_lock_button_style())
+        self.lock_button.clicked.connect(self._toggle_lock)
+        
+        # 设置图标 - 只在选中状态显示
+        if self.lock_y_offset:
+            # 创建勾勾图标（选中状态）
+            icon_pixmap = QPixmap(16, 16)
+            icon_pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(icon_pixmap)
+            
+            # 绘制勾勾图标
+            painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            painter.drawLine(4, 8, 8, 12)  # 勾的第一笔
+            painter.drawLine(8, 12, 12, 4)  # 勾的第二笔
+            
+            painter.end()
+            self.lock_button.setIcon(QIcon(icon_pixmap))
+            self.lock_button.setIconSize(QSize(12, 12))
+        else:
+            # 未选中状态不显示图标，只显示灰色框
+            self.lock_button.setIcon(QIcon())
         
         # 将按钮放在图像内部右上角
-        self.lock_switch.setParent(self.pixmap_label)
-        self.lock_switch.move(128 - 45, 5)  # 右上角位置
+        self.lock_button.setParent(self.pixmap_label)
+        self.lock_button.move(128 - 21, 5)  # 右上角位置
 
         # 设置卡片样式，确保无外边距和边框
         self.setStyleSheet("""
@@ -116,49 +136,57 @@ class SliceCardWidget(QWidget):
             }
         """)
 
-    def _get_lock_switch_style(self):
-        """获取锁定开关样式"""
+    def _get_lock_button_style(self):
+        """获取锁定按钮样式"""
         if self.lock_y_offset:
             return """
                 QPushButton {
                     background-color: #61afef;
-                    border: 2px solid #61afef;
-                    border-radius: 10px;
-                    padding: 0px;
+                    border: 1px solid #61afef;
+                    border-radius: 2px;
+                    padding: 2px;
                 }
-                QPushButton::before {
-                    content: '';
-                    display: inline-block;
-                    width: 16px;
-                    height: 16px;
-                    background-color: white;
-                    border-radius: 8px;
-                    margin-left: 2px;
+                QPushButton:hover {
+                    background-color: #78b9f0;
                 }
             """
         else:
             return """
                 QPushButton {
                     background-color: #444c56;
-                    border: 2px solid #444c56;
-                    border-radius: 10px;
-                    padding: 0px;
+                    border: 1px solid #444c56;
+                    border-radius: 2px;
+                    padding: 2px;
                 }
-                QPushButton::before {
-                    content: '';
-                    display: inline-block;
-                    width: 16px;
-                    height: 16px;
-                    background-color: white;
-                    border-radius: 8px;
-                    margin-right: 2px;
+                QPushButton:hover {
+                    background-color: #5c6370;
                 }
             """
 
     def _toggle_lock(self):
         """切换锁定状态"""
         self.lock_y_offset = not self.lock_y_offset
-        self.lock_switch.setStyleSheet(self._get_lock_switch_style())
+        self.lock_button.setStyleSheet(self._get_lock_button_style())
+        
+        # 更新图标
+        if self.lock_y_offset:
+            # 创建勾勾图标（选中状态）
+            icon_pixmap = QPixmap(16, 16)
+            icon_pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(icon_pixmap)
+            
+            # 绘制勾勾图标
+            painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            painter.drawLine(4, 8, 8, 12)  # 勾的第一笔
+            painter.drawLine(8, 12, 12, 4)  # 勾的第二笔
+            
+            painter.end()
+            self.lock_button.setIcon(QIcon(icon_pixmap))
+            self.lock_button.setIconSize(QSize(12, 12))
+        else:
+            # 未选中状态不显示图标，只显示灰色框
+            self.lock_button.setIcon(QIcon())
+        
         # 发送信号通知状态变化
         if hasattr(self.parent(), 'on_card_selected'):
             self.parent().on_card_selected(self.index, self.lock_y_offset)
@@ -190,8 +218,8 @@ class SliceCardWidget(QWidget):
         if event.button() == Qt.LeftButton:
             # 将事件位置转换到标签坐标系
             label_pos = self.pixmap_label.mapFromGlobal(self.mapToGlobal(event.pos()))
-            # 检查是否点击了锁定开关
-            if self.lock_switch.geometry().contains(label_pos):
+            # 检查是否点击了锁定按钮
+            if self.lock_button.geometry().contains(label_pos):
                 return
             # 切换选中状态
             new_selected = not self.selected_for_crop
