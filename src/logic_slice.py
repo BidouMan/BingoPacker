@@ -175,9 +175,12 @@ class SliceLogic:
     # ==========================================
     # 3. 参考保留层：ManualEditor 专用 (暂时保留)
     # ==========================================
-    def run_manual_slice(self, bg_item, selection_rects):
+    def run_manual_slice(self, bg_item, selection_rects, lock_y_offsets=None):
         """
-        保留参考：根据手动选区进行裁切
+        根据手动选区进行裁切，支持锁定Y轴修正
+        :param bg_item: 背景图元
+        :param selection_rects: 选区矩形列表
+        :param lock_y_offsets: 锁定Y轴偏移的列表，True表示锁定（保持原始位置）
         """
         frames_data = []
         full_pixmap = bg_item.pixmap()
@@ -188,23 +191,45 @@ class SliceLogic:
         if side % 2 != 0:
             side += 1
 
-        for rect in selection_rects:
+        # 计算地面基准线：找到所有帧的底部位置，取最大值作为地面
+        ground_bottom = max(r.y() + r.height() for r in selection_rects)
+        
+        for i, rect in enumerate(selection_rects):
             canvas = QPixmap(side, side)
             canvas.fill(Qt.GlobalColor.transparent)
             painter = QPainter(canvas)
-            ox, oy = (side - rect.width()) // 2, max(0, side - rect.height() - 4)
+            
+            # 水平居中
+            ox = (side - rect.width()) // 2
+            
+            # 根据锁定状态决定Y轴位置
+            lock_y_offset = lock_y_offsets[i] if lock_y_offsets and i < len(lock_y_offsets) else False
+            
+            if lock_y_offset:
+                # 锁定：保持相对于地面的原始位置
+                # 计算该帧底部距离地面的偏移（正值表示离开地面）
+                ground_offset = ground_bottom - (rect.y() + rect.height())
+                # 计算绘制位置：画布底部减去高度再减去偏移
+                oy = side - rect.height() - ground_offset - 4
+                oy = max(0, oy)
+            else:
+                # 未锁定：应用Y轴修正（让角色站在地上）
+                oy = max(0, side - rect.height() - 4)
+            
             painter.drawPixmap(ox, oy, full_pixmap.copy(rect))
             painter.end()
             frames_data.append(
-                {"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy)}
+                {"pixmap": canvas, "rect": rect, "offset": QPointF(ox, oy), "lock_y_offset": lock_y_offset}
             )
         return frames_data
 
     # logic_slice.py 补全后的方法
 
-    def run_auto_slice_to_preview(self, q_pixmap):
+    def run_auto_slice_to_preview(self, q_pixmap, lock_y_offsets=None):
         """
         自动识别算法：将 QPixmap 转换为 OpenCV 处理，返回预览用的帧数据列表
+        :param q_pixmap: 输入图像
+        :param lock_y_offsets: 锁定Y轴偏移的列表，True表示锁定（不应用Y轴修正）
         """
         # 1. QPixmap 转 OpenCV (通过 bytes 中转最稳健)
         buffer = QBuffer()
@@ -270,7 +295,7 @@ class SliceLogic:
         # 4. 生成统一格式的预览数据
         # 构造一个模拟对象以适配 run_manual_slice 的参数要求
         mock_bg_item = type("obj", (object,), {"pixmap": lambda: q_pixmap})
-        return self.run_manual_slice(mock_bg_item, final_sorted_rects)
+        return self.run_manual_slice(mock_bg_item, final_sorted_rects, lock_y_offsets)
 
     def update_fixed_bar(self, percent, is_init=False):
         bar_width = 20
