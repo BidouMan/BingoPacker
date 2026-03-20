@@ -4,3 +4,4 @@ class ToolMode:
     MAGIC_WAND = "WAND"  # 魔棒
     CROP = "CROP"  # 裁切
     PAN = "PAN"  # 平移视图（中键或空格）
+    TRANSFORM = "TRANSFORM"  # 变换工具

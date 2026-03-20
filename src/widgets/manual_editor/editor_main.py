@@ -36,6 +36,7 @@ from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
 from .magic_wand import MagicWandTool, SelectionAntsItem
 from .crop_tool import CropBoxItem
+from .transform_tool import TransformBoxItem
 from .constants import ToolMode
 
 
@@ -348,6 +349,7 @@ class ManualEditor(QWidget, EditorUI):
             lambda: self.set_tool_mode(ToolMode.MAGIC_WAND)
         )
         self.btn_pick.clicked.connect(lambda: self.set_tool_mode(ToolMode.RECT_SELECT))
+        self.btn_transform.clicked.connect(lambda: self.set_tool_mode(ToolMode.TRANSFORM))
         self.btn_cut.clicked.connect(lambda: self.set_tool_mode(ToolMode.CROP))
         self.btn_slice.clicked.connect(self.on_do_slice)
 
@@ -1412,6 +1414,22 @@ class ManualEditor(QWidget, EditorUI):
                 self.set_tool_mode(ToolMode.IDLE)
                 event.accept()
                 return
+        
+        # --- 核心：变换工具的键盘监听 ---
+        elif self.current_tool_mode == ToolMode.TRANSFORM:
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                # 按回车键确认变换
+                self._confirm_transform()
+                event.accept()
+                return
+            elif key == Qt.Key_Escape:
+                # 按Esc键取消变换，恢复变换基准图像
+                if hasattr(self, "transform_base_pixmap"):
+                    self.preview_item.setPixmap(self.transform_base_pixmap)
+                    self.preview_item.setPos(0, 0)
+                self.set_tool_mode(ToolMode.IDLE)
+                event.accept()
+                return
 
         # 3. 裁切模式
         if hasattr(self, "crop_box") and self.crop_box:
@@ -1659,7 +1677,88 @@ class ManualEditor(QWidget, EditorUI):
         # 7. 退出工具模式
         self.set_tool_mode(ToolMode.IDLE)
 
-        self.update_status_bar()  # 刷新状态栏显示
+    def _on_transform_update(self, transform_rect):
+        """实时更新图像变换的回调函数"""
+        target = self.get_active_preview_item()
+        if not target or not hasattr(self, "transform_base_pixmap") or self.transform_base_pixmap.isNull():
+            return
+
+        # 获取变换矩形
+        rect = transform_rect.normalized()
+        
+        # 创建新的图像，保持原始画布尺寸
+        new_pixmap = QPixmap(self.transform_base_pixmap.size())
+        new_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(new_pixmap)
+        
+        # 获取图像的非透明区域边界
+        image_bounds = self._get_image_bounds(self.transform_base_pixmap)
+        
+        # 将图像的非透明区域缩放到变换矩形内
+        painter.drawPixmap(rect, self.transform_base_pixmap, image_bounds)
+        painter.end()
+
+        # 更新显示，但保持画布尺寸不变
+        self.preview_item.setPixmap(new_pixmap)
+        self.preview_item.setPos(0, 0)
+
+    def _confirm_transform(self):
+        """确认变换操作并保存结果"""
+        if not hasattr(self, "transform_box") or not self.transform_box:
+            return
+
+        # 同步数据
+        idx = getattr(self, "last_index", 0)
+        if idx == -1:
+            idx = 0
+
+        # A. 同步到 Bundle (持久层)
+        if self.current_bundle and self.current_bundle.frames:
+            if idx < len(self.current_bundle.frames):
+                self.current_bundle.frames[idx].pixmap = self.preview_item.pixmap()
+                self.current_bundle.original_pixmap = self.preview_item.pixmap()
+
+        # B. 同步到 current_frames (UI 绑定层)
+        if hasattr(self, "current_frames") and self.current_frames:
+            if idx < len(self.current_frames):
+                self.current_frames[idx]["pixmap"] = self.preview_item.pixmap()
+
+        # 刷新 UI 列表
+        self.update_frame_list_ui()
+        
+        # 退出工具模式
+        self.set_tool_mode(ToolMode.IDLE)
+
+    def _get_image_bounds(self, pixmap):
+        """计算图像的非透明区域边界"""
+        if pixmap.isNull():
+            return QRectF(0, 0, pixmap.width(), pixmap.height())
+        
+        image = pixmap.toImage()
+        width = image.width()
+        height = image.height()
+        
+        min_x = width
+        max_x = -1
+        min_y = height
+        max_y = -1
+        
+        # 扫描图像像素，找到非透明区域的边界
+        for y in range(height):
+            for x in range(width):
+                alpha = image.pixelColor(x, y).alpha()
+                if alpha > 0:
+                    min_x = min(min_x, x)
+                    max_x = max(max_x, x)
+                    min_y = min(min_y, y)
+                    max_y = max(max_y, y)
+        
+        # 如果没有非透明像素，返回整个图像
+        if max_x < min_x or max_y < min_y:
+            return QRectF(0, 0, width, height)
+        
+        return QRectF(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
 
     def _reset_tool_buttons(self):
         """将所有工具按钮恢复到未选中状态"""
@@ -1731,20 +1830,15 @@ class ManualEditor(QWidget, EditorUI):
         """
         切换工具模式的唯一入口，负责清理旧状态和初始化新状态
         """
-        print(f"set_tool_mode called with mode: {mode}")
-        
         # 如果不是切换到 IDLE，且当前没有任何底图，则拦截
         if mode != ToolMode.IDLE:
             target = self.get_active_preview_item()
-            print(f"Target item: {target}")
             if not target or not target.pixmap() or target.pixmap().isNull():
-                print(f"Invalid target, resetting tool buttons")
                 # 强制弹回所有工具按钮的状态（取消选中）
                 self._reset_tool_buttons()
                 return
 
         if self.current_tool_mode == mode:
-            print(f"Same mode, returning")
             return
 
         # --- 第一阶段：清理旧工具 (Deactivate) ---
@@ -1775,6 +1869,36 @@ class ManualEditor(QWidget, EditorUI):
             if hasattr(self, "crop_box") and self.crop_box:
                 self.scene.removeItem(self.crop_box)
                 self.crop_box = None
+        
+        elif old_mode == ToolMode.TRANSFORM:
+            # 如果用户正在变换时点别的工具，保存当前变换结果
+            if hasattr(self, "transform_box") and self.transform_box:
+                # 同步数据
+                idx = getattr(self, "last_index", 0)
+                if idx == -1:
+                    idx = 0
+
+                # A. 同步到 Bundle (持久层)
+                if self.current_bundle and self.current_bundle.frames:
+                    if idx < len(self.current_bundle.frames):
+                        self.current_bundle.frames[idx].pixmap = self.preview_item.pixmap()
+                        self.current_bundle.original_pixmap = self.preview_item.pixmap()
+
+                # B. 同步到 current_frames (UI 绑定层)
+                if hasattr(self, "current_frames") and self.current_frames:
+                    if idx < len(self.current_frames):
+                        self.current_frames[idx]["pixmap"] = self.preview_item.pixmap()
+
+                # 刷新 UI 列表
+                self.update_frame_list_ui()
+                
+                # 清理变换框
+                self.scene.removeItem(self.transform_box)
+                self.transform_box = None
+                
+                # 清理变换基准图像缓存
+                if hasattr(self, "transform_base_pixmap"):
+                    delattr(self, "transform_base_pixmap")
 
     def _activate_new_tool(self, mode):
         if mode == ToolMode.RECT_SELECT:
@@ -1803,18 +1927,43 @@ class ManualEditor(QWidget, EditorUI):
                     # 清理选区
                     self.selection_manager.clear_selections()
 
-            # 调试信息
-            print(f"Activating crop tool")
-            print(f"crop_rect: {crop_rect}")
-            
             # 1. 搬家后的写法：直接将裁切框设为底图的子项 (parent_item=target)
             self.crop_box = CropBoxItem(crop_rect, parent_item=target, update_callback=self.update_status_bar)
-            print(f"crop_box created: {self.crop_box}")
             
             # 更新状态栏显示裁切范围尺寸
             self.update_status_bar()
 
             # 2. 视觉配置
+            self.view.setDragMode(QGraphicsView.NoDrag)
+        
+        elif mode == ToolMode.TRANSFORM:
+            target = self.get_active_preview_item()
+            if not target or not target.pixmap() or target.pixmap().isNull():
+                self.set_tool_mode(ToolMode.IDLE)
+                return
+
+            # 保存当前显示的图像作为变换基准
+            self.transform_base_pixmap = target.pixmap().copy()
+            self.save_undo_state()
+
+            # 检查是否有用户选区
+            if hasattr(self, "selection_manager") and self.selection_manager.selections:
+                # 如果只有一个选区，使用它作为变换范围
+                if len(self.selection_manager.selections) == 1:
+                    selection_item = self.selection_manager.selections[0]
+                    # 获取选区在场景中的矩形
+                    scene_rect = selection_item.sceneBoundingRect()
+                    # 转换到底图图元的局部坐标系
+                    local_rect = target.mapFromScene(scene_rect).boundingRect()
+                    transform_rect = local_rect
+            else:
+                # 没有选区时，使用图像的非透明区域边界
+                transform_rect = self._get_image_bounds(self.transform_base_pixmap)
+
+            # 创建变换框，传递回调函数
+            self.transform_box = TransformBoxItem(transform_rect, parent_item=target, transform_callback=self._on_transform_update)
+            
+            # 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)
 
     def show_frame_context_menu(self, pos):
@@ -2091,49 +2240,25 @@ class ManualEditor(QWidget, EditorUI):
                 selected_lock_y_offsets = []
                 selected_indices = []
                 
-                print(f"=== confirm_slice called ===")
-                print(f"preview_cards exists: {hasattr(self, 'preview_cards')}")
-                
                 if hasattr(self, 'preview_cards') and self.preview_cards:
-                    print(f"preview_cards count: {len(self.preview_cards)}")
-                    print(f"current_frames count: {len(self.current_frames)}")
+                        # 收集选中的帧
+                        for i, card in enumerate(self.preview_cards):
+                            if card.selected_for_crop:
+                                # 使用卡片的原始索引从current_frames获取帧数据
+                                if card.index < len(self.current_frames):
+                                    selected_frames.append(self.current_frames[card.index])
+                                    # 从卡片获取锁定设置，而不是从lock_y_offsets列表
+                                    selected_lock_y_offsets.append(card.lock_y_offset)
+                                    selected_indices.append(card.index)
                     
-                    # 打印原始帧数据信息
-                    for i, frame in enumerate(self.current_frames):
-                        rect = frame.get("rect")
-                        if rect:
-                            print(f"Original frame {i} rect: {rect}")
-                    
-                    # 收集选中的帧
-                    for i, card in enumerate(self.preview_cards):
-                        print(f"Card {i}: selected_for_crop = {card.selected_for_crop}, index = {card.index}")
-                        if card.selected_for_crop:
-                            # 使用卡片的原始索引从current_frames获取帧数据
-                            if card.index < len(self.current_frames):
-                                selected_frames.append(self.current_frames[card.index])
-                                # 从卡片获取锁定设置，而不是从lock_y_offsets列表
-                                selected_lock_y_offsets.append(card.lock_y_offset)
-                                selected_indices.append(card.index)
-                                print(f"Adding frame {card.index}, lock_y_offset = {card.lock_y_offset}")
-                                # 打印选中帧的原始索引和rect信息
-                                rect = self.current_frames[card.index].get("rect")
-                                if rect:
-                                    print(f"Selected frame {card.index} rect: {rect}")
-                            else:
-                                print(f"ERROR: card.index {card.index} out of range")
-                
-                # 如果没有选中任何帧，使用所有帧进行裁切
-                if not selected_frames:
-                    print("No frames selected, using all frames")
-                    selected_frames = self.current_frames
-                    # 获取所有卡片的锁定设置
-                    if hasattr(self, 'preview_cards') and self.preview_cards:
-                        selected_lock_y_offsets = [card.lock_y_offset for card in self.preview_cards]
-                    else:
-                        selected_lock_y_offsets = self.lock_y_offsets
-                
-                print(f"Selected frames: {selected_indices}")
-                print(f"Number of frames to slice: {len(selected_frames)}")
+                    # 如果没有选中任何帧，使用所有帧进行裁切
+                    if not selected_frames:
+                        selected_frames = self.current_frames
+                        # 获取所有卡片的锁定设置
+                        if hasattr(self, 'preview_cards') and self.preview_cards:
+                            selected_lock_y_offsets = [card.lock_y_offset for card in self.preview_cards]
+                        else:
+                            selected_lock_y_offsets = self.lock_y_offsets
 
                 # 收集选区矩形，确保每个帧都有rect
                 selection_rects = []
@@ -2141,9 +2266,6 @@ class ManualEditor(QWidget, EditorUI):
                     rect = frame.get("rect")
                     if rect:
                         selection_rects.append(rect)
-                        # 获取选中帧的原始索引
-                        original_index = selected_indices[i] if i < len(selected_indices) else -1
-                        print(f"Selected frame {original_index} rect: {rect}")
                     else:
                         # 如果没有rect，使用预览图的大小
                         pixmap = frame.get("pixmap")
@@ -2152,11 +2274,9 @@ class ManualEditor(QWidget, EditorUI):
                                 QRectF(0, 0, pixmap.width(), pixmap.height())
                             )
                         else:
-                            print(f"Frame {i} has no rect and no pixmap")
                             continue
 
                 if selection_rects:
-                    print(f"Number of frames to slice: {len(selection_rects)}")
                     # 重新生成帧数据，应用锁定设置
                     new_frames_data = self.slice_logic.run_manual_slice(
                         bg_item, selection_rects, selected_lock_y_offsets
