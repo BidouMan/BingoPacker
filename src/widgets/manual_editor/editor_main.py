@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QVBoxLayout,
+    QScrollArea,
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
@@ -22,6 +23,8 @@ from PySide6.QtGui import (
     QRegion,
     QShortcut,
     QKeySequence,
+    QColor,
+    QFont,
 )
 
 from .editor_ui import EditorUI
@@ -36,48 +39,166 @@ from .constants import ToolMode
 
 
 class SliceCardWidget(QWidget):
-    """裁切预览卡片组件"""
+    """裁切预览卡片组件 - Godot风格网格布局"""
 
     def __init__(self, frame_data, index, parent=None):
         super().__init__(parent)
         self.frame_data = frame_data
         self.index = index
         self.lock_y_offset = frame_data.get("lock_y_offset", False)
+        self.selected_for_crop = False  # 默认都不选中，用户需要手动选择
 
-        # 创建布局
+        # 创建主布局
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # 预览图像
+        # 预览图像 - 在图像上显示帧数
         self.pixmap_label = QLabel()
-        self.pixmap_label.setPixmap(
-            frame_data["pixmap"].scaled(120, 120, Qt.KeepAspectRatio)
-        )
+        self.pixmap_label.setFixedSize(128, 128)
         self.pixmap_label.setAlignment(Qt.AlignCenter)
+        
+        # 创建带帧数的图像
+        pixmap = frame_data["pixmap"]
+        scaled_pixmap = pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        # 在图像上绘制帧数
+        canvas = QPixmap(128, 128)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        
+        # 绘制背景
+        painter.fillRect(0, 0, 128, 128, QColor(30, 33, 39))  # #1e2127
+        
+        # 绘制图像，居中
+        x = (128 - scaled_pixmap.width()) // 2
+        y = (128 - scaled_pixmap.height()) // 2
+        painter.drawPixmap(x, y, scaled_pixmap)
+        
+        # 绘制帧数，显示在底部但不被遮挡
+        painter.setPen(QColor(171, 178, 191))  # #abb2bf
+        painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        
+        text = f"{index + 1}"
+        # 绘制在底部居中位置，避免被遮挡
+        text_rect = painter.boundingRect(0, 100, 128, 28, Qt.AlignCenter, text)
+        
+        painter.drawText(text_rect, Qt.AlignCenter, text)
+        painter.end()
+        
+        self.pixmap_label.setPixmap(canvas)
         layout.addWidget(self.pixmap_label)
 
-        # 锁定按钮
-        self.lock_button = QPushButton("锁定Y轴")
-        self.lock_button.setCheckable(True)
-        self.lock_button.setChecked(self.lock_y_offset)
-        self.lock_button.setStyleSheet("""
-            QPushButton {
-                background-color: #21252b;
-                color: #abb2bf;
-                border: 1px solid #181a1f;
-                border-radius: 3px;
-                padding: 4px 16px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #2c313a;
-            }
-            QPushButton:checked {
-                background-color: #444c56;
-                border-color: #565c64;
+        # 创建开关样式的锁定按钮，放在图像内部右上角
+        self.lock_switch = QPushButton()
+        self.lock_switch.setFixedSize(40, 20)
+        self.lock_switch.setStyleSheet(self._get_lock_switch_style())
+        self.lock_switch.clicked.connect(self._toggle_lock)
+        
+        # 将按钮放在图像内部右上角
+        self.lock_switch.setParent(self.pixmap_label)
+        self.lock_switch.move(128 - 45, 5)  # 右上角位置
+
+        # 设置卡片样式，确保无外边距和边框
+        self.setStyleSheet("""
+            QWidget {
+                margin: 0px;
+                padding: 0px;
+                border: none;
             }
         """)
-        layout.addWidget(self.lock_button, alignment=Qt.AlignCenter)
+        self.pixmap_label.setStyleSheet("""
+            QLabel {
+                background-color: #1e2127;
+                border: none;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
+
+    def _get_lock_switch_style(self):
+        """获取锁定开关样式"""
+        if self.lock_y_offset:
+            return """
+                QPushButton {
+                    background-color: #61afef;
+                    border: 2px solid #61afef;
+                    border-radius: 10px;
+                    padding: 0px;
+                }
+                QPushButton::before {
+                    content: '';
+                    display: inline-block;
+                    width: 16px;
+                    height: 16px;
+                    background-color: white;
+                    border-radius: 8px;
+                    margin-left: 2px;
+                }
+            """
+        else:
+            return """
+                QPushButton {
+                    background-color: #444c56;
+                    border: 2px solid #444c56;
+                    border-radius: 10px;
+                    padding: 0px;
+                }
+                QPushButton::before {
+                    content: '';
+                    display: inline-block;
+                    width: 16px;
+                    height: 16px;
+                    background-color: white;
+                    border-radius: 8px;
+                    margin-right: 2px;
+                }
+            """
+
+    def _toggle_lock(self):
+        """切换锁定状态"""
+        self.lock_y_offset = not self.lock_y_offset
+        self.lock_switch.setStyleSheet(self._get_lock_switch_style())
+        # 发送信号通知状态变化
+        if hasattr(self.parent(), 'on_card_selected'):
+            self.parent().on_card_selected(self.index, self.lock_y_offset)
+
+    def set_selected(self, selected):
+        """设置选中状态（用于裁切）"""
+        self.selected_for_crop = selected
+        if selected:
+            self.pixmap_label.setStyleSheet("""
+                QLabel {
+                    background-color: #1e2127;
+                    border: 2px solid #61afef;
+                    margin: 0px;
+                    padding: 0px;
+                }
+            """)
+        else:
+            self.pixmap_label.setStyleSheet("""
+                QLabel {
+                    background-color: #1e2127;
+                    border: 1px solid #3e4451;
+                    margin: 0px;
+                    padding: 0px;
+                }
+            """)
+
+    def mousePressEvent(self, event):
+        """处理鼠标点击事件 - 切换选中状态（用于裁切）"""
+        if event.button() == Qt.LeftButton:
+            # 将事件位置转换到标签坐标系
+            label_pos = self.pixmap_label.mapFromGlobal(self.mapToGlobal(event.pos()))
+            # 检查是否点击了锁定开关
+            if self.lock_switch.geometry().contains(label_pos):
+                return
+            # 切换选中状态
+            new_selected = not self.selected_for_crop
+            self.set_selected(new_selected)
+            # 发送信号通知状态变化
+            if hasattr(self.parent(), 'on_card_selected_for_crop'):
+                self.parent().on_card_selected_for_crop(self.index, new_selected)
 
 
 class ManualEditor(QWidget, EditorUI):
@@ -1749,7 +1870,7 @@ class ManualEditor(QWidget, EditorUI):
             self.current_frame_index = len(self.current_bundle.frames) - 1
 
     def show_preview_view(self):
-        """显示裁切预览视图"""
+        """显示裁切预览视图 - Godot风格网格布局"""
         # 清空预览布局（包括widget和layout）
         while self.preview_layout.count() > 0:
             item = self.preview_layout.takeAt(0)
@@ -1758,50 +1879,92 @@ class ManualEditor(QWidget, EditorUI):
             elif item.layout():
                 self._clear_layout(item.layout())
 
+        # 设置预览视图背景
+        self.preview_view.setStyleSheet("""
+            QWidget {
+                background-color: #21252b;
+            }
+        """)
+
         # 创建主容器
         main_container = QWidget()
         main_layout = QVBoxLayout(main_container)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
-        # 创建卡片容器
-        card_container = QWidget()
-        card_layout = QGridLayout(card_container)
-        card_layout.setSpacing(16)
-        card_layout.setContentsMargins(20, 20, 20, 20)
+        # 创建网格容器 - 设置与卡片相同的背景色，消除视觉间距
+        grid_container = QWidget()
+        grid_container.setStyleSheet("""
+            QWidget {
+                background-color: #1e2127;
+                border: none;
+                padding: 0px;
+            }
+        """)
+
+        # 创建网格布局 - 完全取消间距
+        grid_layout = QGridLayout(grid_container)
+        grid_layout.setSpacing(0)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
 
         # 创建预览卡片
         self.preview_cards = []
         self.lock_y_offsets = [False] * len(self.current_frames)
 
+        # 计算每行显示的列数 - 根据窗口宽度动态调整
+        available_width = self.view_stack.width() - 40  # 减去边距
+        card_width = 128  # 卡片宽度
+        columns = max(1, available_width // card_width)
+        
         for i, frame_data in enumerate(self.current_frames):
-            card = SliceCardWidget(frame_data, i)
+            card = SliceCardWidget(frame_data, i, grid_container)
             self.preview_cards.append(card)
-            card.lock_button.toggled.connect(
-                lambda checked, idx=i: self.on_lock_toggled(checked, idx)
-            )
 
-            # 计算网格位置
-            row = i // 4
-            col = i % 4
-            card_layout.addWidget(card, row, col)
+            # 根据计算的列数动态布局
+            row = i // columns
+            col = i % columns
+            grid_layout.addWidget(card, row, col)
 
-        # 添加按钮布局
-        button_layout = QHBoxLayout()
+        # 创建滚动区域 - 隐藏滚动条
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(grid_container)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setContentsMargins(0, 0, 0, 0)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: #1e2127;
+                border: none;
+                margin: 0px;
+                padding: 0px;
+            }
+            QScrollBar:vertical, QScrollBar:horizontal {
+                width: 0px;
+                height: 0px;
+            }
+        """)
+        main_layout.addWidget(scroll_area)
+
+        # 添加按钮布局 - 居中显示按钮
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(16)
         button_layout.addStretch()
 
         # 取消按钮
         cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.hide_preview_view)
+        cancel_btn.setFixedSize(100, 32)
         cancel_btn.setStyleSheet("""
             QPushButton {
-                background-color: #21252b;
+                background-color: #31363f;
                 color: #abb2bf;
-                border: 1px solid #181a1f;
-                border-radius: 3px;
-                padding: 6px 24px;
+                border: 1px solid #444c56;
+                border-radius: 4px;
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #2c313a;
+                background-color: #3e4451;
             }
         """)
         button_layout.addWidget(cancel_btn)
@@ -1809,13 +1972,13 @@ class ManualEditor(QWidget, EditorUI):
         # 确认按钮
         confirm_btn = QPushButton("确认裁切")
         confirm_btn.clicked.connect(self.confirm_slice)
+        confirm_btn.setFixedSize(100, 32)
         confirm_btn.setStyleSheet("""
             QPushButton {
                 background-color: #61afef;
                 color: #21252b;
                 border: none;
-                border-radius: 3px;
-                padding: 6px 24px;
+                border-radius: 4px;
                 font-size: 14px;
             }
             QPushButton:hover {
@@ -1823,16 +1986,25 @@ class ManualEditor(QWidget, EditorUI):
             }
         """)
         button_layout.addWidget(confirm_btn)
+        button_layout.addStretch()
 
-        # 添加到主布局
-        main_layout.addWidget(card_container)
-        main_layout.addLayout(button_layout)
+        main_layout.addWidget(button_container)
 
         # 添加主容器到预览布局
         self.preview_layout.addWidget(main_container)
 
         # 切换到预览视图
         self.view_stack.setCurrentWidget(self.preview_view)
+
+    def on_card_selected(self, index, selected):
+        """处理卡片锁定状态变化"""
+        self.lock_y_offsets[index] = selected
+    
+    def on_card_selected_for_crop(self, index, selected):
+        """处理卡片裁切选中状态变化"""
+        # 更新卡片的选中状态
+        if hasattr(self, 'preview_cards') and index < len(self.preview_cards):
+            self.preview_cards[index].selected_for_crop = selected
 
     def _clear_layout(self, layout):
         """清空布局中的所有元素"""
@@ -1842,10 +2014,6 @@ class ManualEditor(QWidget, EditorUI):
                 item.widget().deleteLater()
             elif item.layout():
                 self._clear_layout(item.layout())
-
-    def on_lock_toggled(self, checked, index):
-        """处理锁定按钮状态变化"""
-        self.lock_y_offsets[index] = checked
 
     def hide_preview_view(self):
         """隐藏预览视图，返回编辑器视图"""
@@ -1866,29 +2034,83 @@ class ManualEditor(QWidget, EditorUI):
             )
 
             if bg_item:
+                # 收集选中的帧
+                selected_frames = []
+                selected_lock_y_offsets = []
+                selected_indices = []
+                
+                print(f"=== confirm_slice called ===")
+                print(f"preview_cards exists: {hasattr(self, 'preview_cards')}")
+                
+                if hasattr(self, 'preview_cards') and self.preview_cards:
+                    print(f"preview_cards count: {len(self.preview_cards)}")
+                    print(f"current_frames count: {len(self.current_frames)}")
+                    
+                    # 打印原始帧数据信息
+                    for i, frame in enumerate(self.current_frames):
+                        rect = frame.get("rect")
+                        if rect:
+                            print(f"Original frame {i} rect: {rect}")
+                    
+                    # 收集选中的帧
+                    for i, card in enumerate(self.preview_cards):
+                        print(f"Card {i}: selected_for_crop = {card.selected_for_crop}, index = {card.index}")
+                        if card.selected_for_crop:
+                            # 使用卡片的原始索引从current_frames获取帧数据
+                            if card.index < len(self.current_frames):
+                                selected_frames.append(self.current_frames[card.index])
+                                # 从卡片获取锁定设置，而不是从lock_y_offsets列表
+                                selected_lock_y_offsets.append(card.lock_y_offset)
+                                selected_indices.append(card.index)
+                                print(f"Adding frame {card.index}, lock_y_offset = {card.lock_y_offset}")
+                                # 打印选中帧的原始索引和rect信息
+                                rect = self.current_frames[card.index].get("rect")
+                                if rect:
+                                    print(f"Selected frame {card.index} rect: {rect}")
+                            else:
+                                print(f"ERROR: card.index {card.index} out of range")
+                
+                # 如果没有选中任何帧，使用所有帧进行裁切
+                if not selected_frames:
+                    print("No frames selected, using all frames")
+                    selected_frames = self.current_frames
+                    # 获取所有卡片的锁定设置
+                    if hasattr(self, 'preview_cards') and self.preview_cards:
+                        selected_lock_y_offsets = [card.lock_y_offset for card in self.preview_cards]
+                    else:
+                        selected_lock_y_offsets = self.lock_y_offsets
+                
+                print(f"Selected frames: {selected_indices}")
+                print(f"Number of frames to slice: {len(selected_frames)}")
+
                 # 收集选区矩形，确保每个帧都有rect
                 selection_rects = []
-                for frame in self.current_frames:
+                for i, frame in enumerate(selected_frames):
                     rect = frame.get("rect")
                     if rect:
                         selection_rects.append(rect)
+                        # 获取选中帧的原始索引
+                        original_index = selected_indices[i] if i < len(selected_indices) else -1
+                        print(f"Selected frame {original_index} rect: {rect}")
                     else:
                         # 如果没有rect，使用预览图的大小
                         pixmap = frame.get("pixmap")
                         if pixmap:
                             selection_rects.append(
-                                QRect(0, 0, pixmap.width(), pixmap.height())
+                                QRectF(0, 0, pixmap.width(), pixmap.height())
                             )
                         else:
+                            print(f"Frame {i} has no rect and no pixmap")
                             continue
 
                 if selection_rects:
+                    print(f"Number of frames to slice: {len(selection_rects)}")
                     # 重新生成帧数据，应用锁定设置
                     new_frames_data = self.slice_logic.run_manual_slice(
-                        bg_item, selection_rects, self.lock_y_offsets
+                        bg_item, selection_rects, selected_lock_y_offsets
                     )
 
-                    # 更新bundle
+                    # 更新bundle - 只使用选中的帧
                     self.current_bundle.frames = []
                     for i, f in enumerate(new_frames_data, start=1):
                         frame_obj = FrameData(
@@ -1898,6 +2120,7 @@ class ManualEditor(QWidget, EditorUI):
                         )
                         self.current_bundle.frames.append(frame_obj)
 
+                    # 更新当前帧数据 - 只使用选中的帧
                     self.current_frames = new_frames_data
 
                     # 更新片段信息
