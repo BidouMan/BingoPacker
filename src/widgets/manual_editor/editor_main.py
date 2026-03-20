@@ -1706,10 +1706,15 @@ class ManualEditor(QWidget, EditorUI):
             f"帧: {curr_idx if curr_idx > 0 else 0} / {total_frames}"
         )
 
-        # 2. 更新尺寸
-        if self.preview_item and self.preview_item.pixmap():
+        # 2. 更新尺寸 - 如果有裁切框，显示裁切范围尺寸
+        if hasattr(self, 'crop_box') and self.crop_box:
+            crop_rect = self.crop_box.rect()
+            size_text = f"裁切范围: {int(crop_rect.width())} x {int(crop_rect.height())} PX"
+            self.lbl_frame_size.setText(size_text)
+        elif self.preview_item and self.preview_item.pixmap():
             pix = self.preview_item.pixmap()
-            self.lbl_frame_size.setText(f"尺寸: {pix.width()} x {pix.height()} PX")
+            size_text = f"尺寸: {pix.width()} x {pix.height()} PX"
+            self.lbl_frame_size.setText(size_text)
 
         # # 3. 更新缩放 (如果你的 ScalableView 有这个属性)
         # if hasattr(self.view, "current_zoom"):
@@ -1726,15 +1731,20 @@ class ManualEditor(QWidget, EditorUI):
         """
         切换工具模式的唯一入口，负责清理旧状态和初始化新状态
         """
+        print(f"set_tool_mode called with mode: {mode}")
+        
         # 如果不是切换到 IDLE，且当前没有任何底图，则拦截
         if mode != ToolMode.IDLE:
             target = self.get_active_preview_item()
+            print(f"Target item: {target}")
             if not target or not target.pixmap() or target.pixmap().isNull():
+                print(f"Invalid target, resetting tool buttons")
                 # 强制弹回所有工具按钮的状态（取消选中）
                 self._reset_tool_buttons()
                 return
 
         if self.current_tool_mode == mode:
+            print(f"Same mode, returning")
             return
 
         # --- 第一阶段：清理旧工具 (Deactivate) ---
@@ -1793,8 +1803,16 @@ class ManualEditor(QWidget, EditorUI):
                     # 清理选区
                     self.selection_manager.clear_selections()
 
+            # 调试信息
+            print(f"Activating crop tool")
+            print(f"crop_rect: {crop_rect}")
+            
             # 1. 搬家后的写法：直接将裁切框设为底图的子项 (parent_item=target)
-            self.crop_box = CropBoxItem(crop_rect, parent_item=target)
+            self.crop_box = CropBoxItem(crop_rect, parent_item=target, update_callback=self.update_status_bar)
+            print(f"crop_box created: {self.crop_box}")
+            
+            # 更新状态栏显示裁切范围尺寸
+            self.update_status_bar()
 
             # 2. 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)

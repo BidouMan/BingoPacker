@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem
-from PySide6.QtCore import Qt, QPointF, QPoint
-from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QBrush, QPainterPath
+from PySide6.QtCore import Qt, QRectF, QPointF, QPoint
+from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QBrush, QPainterPath, QFont
 
 
 class CropHandle(QGraphicsRectItem):
@@ -58,13 +58,15 @@ class CropHandle(QGraphicsRectItem):
 
 
 class CropBoxItem(QGraphicsRectItem):
-    def __init__(self, initial_rect, parent_item=None):
+    
+    def __init__(self, initial_rect, parent_item=None, update_callback=None):
         super().__init__(initial_rect, parent_item)
         pen = QPen(QColor("#61afef"), 1.5)  # 1.5 像素宽，蓝白色
         pen.setCosmetic(True)  # 关键：让线宽不随缩放改变
         pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)  # 让拐角尖锐
         self.setPen(pen)
         self.setZValue(1000)
+        self.update_callback = update_callback  # 添加回调函数
 
         self.handles = {}
         for key in ["tl", "tm", "tr", "ml", "mr", "bl", "bm", "br"]:
@@ -97,23 +99,30 @@ class CropBoxItem(QGraphicsRectItem):
         """当用户拖动某个手柄时，重新计算矩形大小"""
         r = self.rect()
         min_size = 5  # 允许裁切的最小像素尺寸
+        
+        # 简单像素吸附：直接吸附到最近的整数像素
+        snapped_pos = QPointF(round(new_pos.x()), round(new_pos.y()))
 
         if "t" in key:
-            if r.bottom() - new_pos.y() > min_size:
-                r.setTop(new_pos.y())
+            if r.bottom() - snapped_pos.y() > min_size:
+                r.setTop(snapped_pos.y())
         if "b" in key:
-            if new_pos.y() - r.top() > min_size:
-                r.setBottom(new_pos.y())
+            if snapped_pos.y() - r.top() > min_size:
+                r.setBottom(snapped_pos.y())
         if "l" in key:
-            if r.right() - new_pos.x() > min_size:
-                r.setLeft(new_pos.x())
+            if r.right() - snapped_pos.x() > min_size:
+                r.setLeft(snapped_pos.x())
         if "r" in key:
-            if new_pos.x() - r.left() > min_size:
-                r.setRight(new_pos.x())
+            if snapped_pos.x() - r.left() > min_size:
+                r.setRight(snapped_pos.x())
 
         self.setRect(r.normalized())
         self.update_handles_pos()  # 联动更新其他手柄位置
         self.update()  # 触发重绘遮罩和九宫格
+        
+        # 调用回调函数更新状态栏
+        if self.update_callback:
+            self.update_callback()
 
     def paint(self, painter, option, widget):
         r = self.rect()
@@ -139,6 +148,11 @@ class CropBoxItem(QGraphicsRectItem):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPath(mask_path)
 
+        # 3. 绘制主蓝色边框
+        painter.setPen(self.pen())
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(r)
+
         # 2. 绘制九宫格辅助线
         painter.setPen(QPen(QColor(255, 255, 255, 100), 0, Qt.PenStyle.DashLine))
         w, h = r.width(), r.height()
@@ -158,11 +172,6 @@ class CropBoxItem(QGraphicsRectItem):
             QPointF(r.left(), r.top() + 2 * h / 3),
             QPointF(r.right(), r.top() + 2 * h / 3),
         )
-
-        # 3. 绘制主蓝色边框
-        painter.setPen(self.pen())
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(r)
 
         painter.restore()
 
