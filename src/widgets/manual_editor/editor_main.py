@@ -824,6 +824,12 @@ class ManualEditor(QWidget, EditorUI):
         # 确保图像始终在 (0,0) 位置显示
         self.preview_item.setPos(0, 0)
 
+        # 居中显示图像
+        if hasattr(self.view, 'centerOn'):
+            self.view.centerOn(self.preview_item)
+        elif hasattr(self.view, 'fitInView'):
+            self.view.fitInView(self.preview_item, Qt.KeepAspectRatio)
+
         # 更新当前帧索引
         self.current_frame_index = index
 
