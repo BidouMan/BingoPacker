@@ -217,7 +217,7 @@ class AssetTree(QTreeWidget):
             # --- 强制安全检查：确保该对象确实在模型列表中 ---
             # 如果 id 对不上，说明这是一个副本，我们需要把它同步回模型
             if not any(x is seg for x in bundle.segments):
-                print("WARNING [AssetTree]: 检测到引用断裂，正在尝试通过索引修复...")
+
                 # 这种情况通常发生在 bundle.segments 被整体替换时
                 # 我们可以尝试通过 item 的 index 来寻找在模型中的对应位置
                 idx = parent.indexOfChild(item)
@@ -388,7 +388,30 @@ class AssetTree(QTreeWidget):
         from PySide6.QtWidgets import QMenu
 
         menu = QMenu()
-        if menu.addAction("删除片段") == menu.exec(self.mapToGlobal(pos)):
+        # 设置one dark风格的QSS
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #21252b;
+                border: 1px solid #181a1f;
+                color: #abb2bf;
+                padding: 2px;
+            }
+            QMenu::item {
+                padding: 4px 16px;
+                margin: 1px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #2c313a;
+                color: #abb2bf;
+            }
+        """)
+        
+        action = menu.addAction("删除片段")
+        # 显示菜单并获取返回值
+        selected_action = menu.exec(self.mapToGlobal(pos))
+        # 只有左键点击才会返回action，右键点击会返回None
+        if selected_action == action:
             bundle = item.parent().data(0, Qt.UserRole)
             bundle.segments.remove(item.data(0, Qt.UserRole))
             item.parent().removeChild(item)

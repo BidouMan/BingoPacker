@@ -587,8 +587,8 @@ class SelectionManager:
                             )
                     break
                 parent_widget = parent_widget.parent()
-        except Exception as e:
-            print(f"Sync error: {e}")
+        except Exception:
+            pass
 
     def _get_valid_selections(self):
         """寻找场景中所有的选区框，增加极致防御，防止 Internal C++ object deleted"""

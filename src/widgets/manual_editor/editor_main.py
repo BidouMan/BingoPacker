@@ -973,9 +973,6 @@ class ManualEditor(QWidget, EditorUI):
 
     def save_current_frame_changes(self, frame_index):
         """手动保存当前帧的修改，模拟手动取消选区的效果"""
-        print(
-            f"DEBUG save_current_frame_changes: Saving changes for frame {frame_index}"
-        )
 
         # 获取目标帧数据
         target_frame = self.current_bundle.frames[frame_index]
@@ -1637,8 +1634,31 @@ class ManualEditor(QWidget, EditorUI):
         # 创建右键菜单
         menu = QMenu(self)
 
+        # 设置one dark风格的QSS
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #21252b;
+                border: 1px solid #181a1f;
+                color: #abb2bf;
+                padding: 2px;
+            }
+            QMenu::item {
+                padding: 4px 16px;
+                margin: 1px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #2c313a;
+                color: #abb2bf;
+            }
+        """)
+
         # 添加删除帧动作
-        if menu.addAction("删除帧") == menu.exec(self.frame_list.mapToGlobal(pos)):
+        action = menu.addAction("删除帧")
+        # 显示菜单并获取返回值
+        selected_action = menu.exec(self.frame_list.mapToGlobal(pos))
+        # 只有左键点击才会返回action，右键点击会返回None
+        if selected_action == action:
             self.delete_frame(row)
 
     def delete_frame(self, frame_index):

@@ -60,7 +60,6 @@ class AssetManager:
         """从仓库中移除特定的资源项"""
         if name in self._storage:
             del self._storage[name]
-            print(f">>> [AssetManager] 资源 {name} 已移除")
             return True
         return False
 
@@ -72,8 +71,7 @@ class AssetManager:
         场景B：用户拖入10张图时，循环调用此方法即可
         """
         if not os.path.exists(file_path):
-            print(f"ERROR: 文件不存在: {file_path}")
-            return None
+                return None
 
         ext = os.path.splitext(file_path)[1].lower()
         try:
@@ -83,9 +81,8 @@ class AssetManager:
                 return self._parse_sprite3(file_path)
             elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp"]:
                 return self._parse_single_image(file_path)
-        except Exception as e:
-            print(f"ERROR: 解析 {ext} 失败: {e}")
-        return None
+        except Exception:
+            return None
 
     def load_from_folder(self, folder_path):
         """
