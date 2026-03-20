@@ -140,6 +140,9 @@ class EditorUI:
         self.btn_pick = self._create_tool_btn(
             "btn_pick", "选取", True, tip_config=tips["pick"]
         )
+        self.btn_transform = self._create_tool_btn(
+            "btn_transform", "变换", True, tip_config=tips["transform"]
+        )
         self.btn_cut = self._create_tool_btn(
             "btn_cut", "裁切画布", True, tip_config=tips["cut"]
         )
@@ -150,12 +153,14 @@ class EditorUI:
         self.tool_group = QButtonGroup(widget)
         self.tool_group.addButton(self.btn_magic_wand)
         self.tool_group.addButton(self.btn_pick)
+        self.tool_group.addButton(self.btn_transform)
         self.tool_group.addButton(self.btn_slice)
 
         toolbar_layout.addWidget(self.btn_new_file)
         toolbar_layout.addWidget(self.btn_save)
         toolbar_layout.addWidget(self.btn_magic_wand)
         toolbar_layout.addWidget(self.btn_pick)
+        toolbar_layout.addWidget(self.btn_transform)
         toolbar_layout.addWidget(self.btn_cut)
         toolbar_layout.addWidget(self.btn_slice)
 
@@ -413,6 +418,11 @@ class EditorUI:
                 "title": "智能裁切",
                 "desc": "将当前资源自动裁切成序列帧",
                 # "shortcuts": [("拖动", "创建裁切框"), ("Ctrl+拖动", "移动裁切框")],
+            },
+            "transform": {
+                "title": "变换工具",
+                "desc": "对图像进行变换操作",
+                "shortcuts": [("点击", "打开变换面板")],
             },
             "expand": {
                 "title": "扩展选区",
