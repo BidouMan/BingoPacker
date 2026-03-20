@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QToolTip,
     QPushButton,
+    QMenu,
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
@@ -143,6 +144,10 @@ class ManualEditor(QWidget, EditorUI):
 
         # 其他工具
         self.frame_list.currentRowChanged.connect(self.before_frame_changed)
+
+        # 添加右键菜单支持
+        self.frame_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.frame_list.customContextMenuRequested.connect(self.show_frame_context_menu)
 
     def before_frame_changed(self, new_row):
         """
@@ -518,6 +523,11 @@ class ManualEditor(QWidget, EditorUI):
 
         # 选中第一帧并自动适配视图
         if self.current_bundle and self.current_bundle.frames:
+            # 清空预览项，避免保存旧的完整图像到第一帧
+            if self.preview_item:
+                self.scene.removeItem(self.preview_item)
+                self.preview_item = None
+
             self.frame_list.setCurrentRow(0)
             self.switch_frame_preview(0)
 
@@ -1274,6 +1284,12 @@ class ManualEditor(QWidget, EditorUI):
 
                     return True
 
+        # --- 处理frame_list的右键菜单事件 ---
+        if source == self.frame_list and event.type() == QEvent.ContextMenu:
+            # 直接调用右键菜单处理函数
+            self.show_frame_context_menu(event.pos())
+            return True
+
         # --- 1. 处理鼠标事件 (解决选区不触发的核心) ---
         if source == self.view.viewport():
             mode = self.current_tool_mode
@@ -1608,3 +1624,84 @@ class ManualEditor(QWidget, EditorUI):
 
             # 2. 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)
+
+    def show_frame_context_menu(self, pos):
+        """显示帧列表的右键菜单"""
+        # 获取点击位置对应的item
+        item = self.frame_list.itemAt(pos)
+        if not item:
+            return
+
+        row = self.frame_list.row(item)
+
+        # 创建右键菜单
+        menu = QMenu(self)
+
+        # 添加删除帧动作
+        if menu.addAction("删除帧") == menu.exec(self.frame_list.mapToGlobal(pos)):
+            self.delete_frame(row)
+
+    def delete_frame(self, frame_index):
+        """删除指定索引的帧 - 单独的函数设计"""
+        if (
+            not self.current_bundle
+            or frame_index < 0
+            or frame_index >= len(self.current_bundle.frames)
+        ):
+            return
+
+        # 保存删除前的状态用于撤销
+        self.save_undo_state()
+
+        # 保存当前帧的修改
+        self._save_current_frame_changes()
+
+        # 删除底层数据
+        self.current_bundle.frames.pop(frame_index)
+
+        # 同步删除缓存
+        if hasattr(self, "current_frames") and frame_index < len(self.current_frames):
+            self.current_frames.pop(frame_index)
+
+        # 更新片段信息
+        for segment in self.current_bundle.segments:
+            if segment.get("end") > frame_index + 1:
+                segment["end"] -= 1
+
+        # 更新UI列表
+        self.update_frame_list_ui()
+
+        # 更新当前帧索引
+        self._update_current_frame_index_after_delete(frame_index)
+
+        # 选中并显示新的当前帧
+        if self.current_bundle.frames:
+            # 清空预览项，避免保存旧的被删除帧图像到新帧
+            if self.preview_item:
+                self.scene.removeItem(self.preview_item)
+                self.preview_item = None
+
+            self.frame_list.setCurrentRow(self.current_frame_index)
+            self.switch_frame_preview(self.current_frame_index)
+
+        # 同步数据
+        self.sync_and_notify()
+
+    def _save_current_frame_changes(self):
+        """保存当前帧的修改"""
+        if self.preview_item and self.current_bundle and self.current_frame_index >= 0:
+            if 0 <= self.current_frame_index < len(self.current_bundle.frames):
+                current_pixmap = self.preview_item.pixmap()
+                self.current_bundle.frames[
+                    self.current_frame_index
+                ].pixmap = current_pixmap
+
+    def _update_current_frame_index_after_delete(self, deleted_index):
+        """删除帧后更新当前帧索引"""
+        if deleted_index <= self.current_frame_index:
+            self.current_frame_index -= 1
+        # 确保索引在有效范围内
+        if self.current_frame_index < 0:
+            self.current_frame_index = 0
+        if self.current_frame_index >= len(self.current_bundle.frames):
+            self.current_frame_index = len(self.current_bundle.frames) - 1
