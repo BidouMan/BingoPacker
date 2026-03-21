@@ -1502,6 +1502,29 @@ class ManualEditor(QWidget, EditorUI):
             event.accept()
             return
 
+        # 3. 全选功能（仅在btn_pick模式下）
+        if is_ctrl and key == Qt.Key_A and self.btn_pick.isChecked():
+            target = self.get_active_preview_item()
+            if target and target.pixmap() and not target.pixmap().isNull():
+                # 获取图像的边界
+                image_rect = target.boundingRect()
+                # 创建全选矩形
+                from PySide6.QtWidgets import QGraphicsRectItem
+                from PySide6.QtCore import QRectF
+
+                # 清理现有选区
+                self.selection_manager.clear_selections()
+
+                # 创建新的全选选区
+                selection_item = QGraphicsRectItem(image_rect)
+                selection_item.setPen(self.selection_manager.add_pen)
+                selection_item.setBrush(self.selection_manager.add_color)
+                selection_item.setZValue(10)
+                self.scene.addItem(selection_item)
+                self.selection_manager.selections.append(selection_item)
+            event.accept()
+            return
+
         # --- 核心：裁切工具的键盘监听 ---
         if self.current_tool_mode == ToolMode.CROP:
             if key in (Qt.Key_Return, Qt.Key_Enter):
