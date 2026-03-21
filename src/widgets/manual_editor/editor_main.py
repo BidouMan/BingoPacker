@@ -1786,8 +1786,8 @@ class ManualEditor(QWidget, EditorUI):
         ):
             return
 
-        # 获取变换矩形
-        rect = transform_rect.normalized()
+        # 获取变换矩形（不进行任何修改，直接使用传入的矩形）
+        rect = transform_rect
 
         # 创建新的图像，保持原始画布尺寸
         new_pixmap = QPixmap(self.transform_base_pixmap.size())
@@ -1805,7 +1805,7 @@ class ManualEditor(QWidget, EditorUI):
         # 恢复正常绘制模式
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-        # 将原始选区区域内的图像缩放到变换矩形内
+        # 将原始选区区域内的图像缩放到变换矩形内（使用精确坐标）
         painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
         painter.end()
 
@@ -2072,39 +2072,40 @@ class ManualEditor(QWidget, EditorUI):
             self.transform_base_pixmap = target.pixmap().copy()
             self.save_undo_state()
 
-            # 调试信息
-            print(f"=== Transform Tool Selection Debug ===")
-            print(f"Has selection_manager: {hasattr(self, 'selection_manager')}")
-
             # 检查是否有用户选区
             if hasattr(self, "selection_manager") and self.selection_manager.selections:
-                print(f"Number of selections: {len(self.selection_manager.selections)}")
                 # 如果只有一个选区，使用它作为变换范围
                 if len(self.selection_manager.selections) == 1:
                     selection_item = self.selection_manager.selections[0]
-                    # 获取选区在场景中的矩形
-                    scene_rect = selection_item.sceneBoundingRect()
-                    print(f"Scene rect: {scene_rect}")
+                    # 获取选区的精确矩形（不包含pen宽度）
+                    rect = selection_item.rect()
+                    # 获取选区在场景中的位置
+                    scene_pos = selection_item.scenePos()
+                    # 创建场景坐标系下的精确矩形
+                    scene_rect = QRectF(
+                        scene_pos.x() + rect.left(),
+                        scene_pos.y() + rect.top(),
+                        rect.width(),
+                        rect.height(),
+                    )
                     # 转换到底图图元的局部坐标系
                     local_rect = target.mapFromScene(scene_rect).boundingRect()
-                    print(f"Local rect: {local_rect}")
 
-                    # 保存选区的原始矩形作为变换的源区域
+                    # 保存选区的原始矩形作为变换的源区域（不进行像素对齐，保持精确）
                     self.selection_source_rect = local_rect
+                    # 使用精确的选区矩形创建变换框
                     transform_rect = local_rect
 
                     # 清除选区框，避免显示不一致
                     self.selection_manager.clear_selections()
                 else:
-                    print("Multiple selections, using image bounds")
-                    # 没有选区时，使用图像的非透明区域边界
+                    # 多个选区时，使用图像的非透明区域边界
                     transform_rect = self._get_image_bounds(self.transform_base_pixmap)
                     self.selection_source_rect = transform_rect
 
                     # 清除选区框
                     self.selection_manager.clear_selections()
             else:
-                print("No selections, using image bounds")
                 # 没有选区时，使用图像的非透明区域边界
                 transform_rect = self._get_image_bounds(self.transform_base_pixmap)
                 self.selection_source_rect = transform_rect

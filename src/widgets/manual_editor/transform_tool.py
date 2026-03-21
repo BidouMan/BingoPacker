@@ -39,30 +39,89 @@ class TransformHandle(QGraphicsRectItem):
         ):
             new_pos = value
             rect = self.parentItem().rect()
-
+            original_rect = QRectF(rect)
+            
+            # 获取父项的初始宽高比（用于等比缩放）
+            initial_ratio = self.parentItem().initial_ratio
+            
+            # 检查是否按下了Shift键
+            from PySide6.QtWidgets import QApplication
+            is_shift_pressed = QApplication.keyboardModifiers() & Qt.ShiftModifier
+            
             # 根据不同位置的手柄限制移动方向
             if self.pos_key == "tl":  # 左上角：可以调整宽高
                 if rect.right() - new_pos.x() > 5 and rect.bottom() - new_pos.y() > 5:
-                    rect.setTopLeft(new_pos)
+                    if is_shift_pressed:
+                        # 等比缩放：保持初始宽高比
+                        new_width = rect.right() - new_pos.x()
+                        new_height = new_width / initial_ratio
+                        rect.setTopLeft(QPointF(new_pos.x(), rect.bottom() - new_height))
+                    else:
+                        rect.setTopLeft(new_pos)
             elif self.pos_key == "tr":  # 右上角：可以调整宽高
                 if new_pos.x() - rect.left() > 5 and rect.bottom() - new_pos.y() > 5:
-                    rect.setTopRight(new_pos)
+                    if is_shift_pressed:
+                        # 等比缩放：保持初始宽高比
+                        new_width = new_pos.x() - rect.left()
+                        new_height = new_width / initial_ratio
+                        rect.setTopRight(QPointF(new_pos.x(), rect.bottom() - new_height))
+                    else:
+                        rect.setTopRight(new_pos)
             elif self.pos_key == "bl":  # 左下角：可以调整宽高
                 if rect.right() - new_pos.x() > 5 and new_pos.y() - rect.top() > 5:
-                    rect.setBottomLeft(new_pos)
+                    if is_shift_pressed:
+                        # 等比缩放：保持初始宽高比
+                        new_height = new_pos.y() - rect.top()
+                        new_width = new_height * initial_ratio
+                        rect.setBottomLeft(QPointF(rect.right() - new_width, new_pos.y()))
+                    else:
+                        rect.setBottomLeft(new_pos)
             elif self.pos_key == "br":  # 右下角：可以调整宽高
                 if new_pos.x() - rect.left() > 5 and new_pos.y() - rect.top() > 5:
-                    rect.setBottomRight(new_pos)
+                    if is_shift_pressed:
+                        # 等比缩放：保持初始宽高比
+                        new_width = new_pos.x() - rect.left()
+                        new_height = new_width / initial_ratio
+                        rect.setBottomRight(QPointF(new_pos.x(), rect.top() + new_height))
+                    else:
+                        rect.setBottomRight(new_pos)
 
-            self.parentItem().setRect(rect)
+            # 如果矩形尺寸没有变化（达到最小限制），阻止手柄移动
+            if rect == original_rect:
+                # 返回手柄应该在的位置（选框角落）
+                if self.pos_key == "tl":
+                    return rect.topLeft()
+                elif self.pos_key == "tr":
+                    return rect.topRight()
+                elif self.pos_key == "bl":
+                    return rect.bottomLeft()
+                elif self.pos_key == "br":
+                    return rect.bottomRight()
+
+            # 像素吸附：将矩形坐标对齐到整数像素
+            aligned_rect = QRectF(
+                round(rect.left()),
+                round(rect.top()),
+                round(rect.width()),
+                round(rect.height())
+            )
+            self.parentItem().setRect(aligned_rect)
             self.parentItem().update_handles_pos()
             
             # 实时更新图像变换
             if hasattr(self.parentItem(), 'update_transform'):
                 self.parentItem().update_transform()
                 
-            return new_pos  # 返回限制后的坐标
-
+            # 返回手柄的新位置（应该是矩形的角落）
+            if self.pos_key == "tl":
+                return rect.topLeft()
+            elif self.pos_key == "tr":
+                return rect.topRight()
+            elif self.pos_key == "bl":
+                return rect.bottomLeft()
+            elif self.pos_key == "br":
+                return rect.bottomRight()
+            
         return super().itemChange(change, value)
 
 
@@ -76,6 +135,11 @@ class TransformBoxItem(QGraphicsRectItem):
         self.setPen(pen)
         self.setZValue(1000)
         self.transform_callback = transform_callback  # 添加回调函数
+        
+        # 保存初始宽高比，用于等比缩放
+        self.initial_width = initial_rect.width()
+        self.initial_height = initial_rect.height()
+        self.initial_ratio = self.initial_width / self.initial_height if self.initial_height > 0 else 1
 
         self.handles = {}
         for key in ["tl", "tr", "bl", "br"]:
@@ -96,6 +160,7 @@ class TransformBoxItem(QGraphicsRectItem):
         }
         for key, pos in h_map.items():
             self.handles[key].enabledSignals = False
+            # 直接设置手柄位置到矩形的精确角落位置
             self.handles[key].setPos(pos)
             self.handles[key].enabledSignals = True
 
