@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QScrollArea,
 )
-from PySide6.QtCore import Qt, QRectF, Signal, QSize, QPoint, QEvent, QTimer
+from PySide6.QtCore import Qt, QRectF, QRect, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
     QPixmap,
     QIcon,
@@ -304,9 +304,30 @@ class ManualEditor(QWidget, EditorUI):
         if not urls:
             return
 
-        path = urls[0].toLocalFile()
-        # 处理拖入的文件或文件夹
-        self.display_image(path)
+        # 检查事件是否发生在frame_list上
+        drop_position = event.pos()
+        frame_list_geometry = self.frame_list.geometry()
+
+        # 如果事件位置在frame_list的范围内，执行追加序列帧逻辑
+        if frame_list_geometry.contains(drop_position):
+            # 处理所有拖拽的URL
+            for url in urls:
+                path = url.toLocalFile()
+                # 调试信息
+                print(f"=== Drop Event Debug ===")
+                print(f"Drop path: {path}")
+                print(f"Drop position: {drop_position}")
+                print(f"Frame list geometry: {frame_list_geometry}")
+                print(
+                    f"Is in frame_list: {frame_list_geometry.contains(drop_position)}"
+                )
+                print("Executing append_frames_to_list")
+                self.append_frames_to_list(path)
+        else:
+            # 其他情况执行原有逻辑（清空场景），只处理第一个文件
+            path = urls[0].toLocalFile()
+            print("Executing display_image (clear scene)")
+            self.display_image(path)
 
         self.frame_list.installEventFilter(self)
         # 同时也给视图加上，确保点击画布后也能响应
@@ -526,6 +547,79 @@ class ManualEditor(QWidget, EditorUI):
                 )
 
         self.update_status_bar()  # 刷新状态栏显示
+
+    def append_frames_to_list(self, file_path):
+        """追加序列帧到当前编辑器，不清空现有场景"""
+        if not os.path.exists(file_path):
+            return
+
+        # 保存当前选择的帧索引
+        current_index = self.frame_list.currentRow()
+
+        # 检查是否为文件夹
+        if os.path.isdir(file_path):
+            self._append_frames_from_folder(file_path)
+        else:
+            self._append_single_frame(file_path)
+
+        # 恢复之前选中的帧索引
+        if current_index >= 0 and current_index < self.frame_list.count():
+            self.frame_list.setCurrentRow(current_index)
+
+    def _append_single_frame(self, file_path):
+        """追加单帧图像到序列"""
+        pixmap = QPixmap(file_path)
+        if pixmap.isNull():
+            return
+
+        # 创建新的帧数据
+        frame_name = os.path.basename(file_path)
+        frame_index = len(self.current_frames)
+
+        # 添加到数据模型
+        frame_data = {"pixmap": pixmap, "name": frame_name, "index": frame_index}
+        self.current_frames.append(frame_data)
+
+        # 添加到AssetBundle
+        if self.current_bundle:
+            # 创建帧的矩形信息（使用图像的完整边界）
+            rect = QRect(0, 0, pixmap.width(), pixmap.height())
+            frame = FrameData(pixmap, rect, frame_name)
+            frame.index = frame_index
+            self.current_bundle.frames.append(frame)
+
+        # 更新UI
+        self.update_frame_list_ui()
+
+    def _append_frames_from_folder(self, folder_path):
+        """从文件夹追加序列帧"""
+        valid_exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
+        files.sort()  # 按文件名排序
+
+        for filename in files:
+            file_path = os.path.join(folder_path, filename)
+            pixmap = QPixmap(file_path)
+            if pixmap.isNull():
+                continue
+
+            # 创建新的帧数据
+            frame_index = len(self.current_frames)
+
+            # 添加到数据模型
+            frame_data = {"pixmap": pixmap, "name": filename, "index": frame_index}
+            self.current_frames.append(frame_data)
+
+            # 添加到AssetBundle
+            if self.current_bundle:
+                # 创建帧的矩形信息（使用图像的完整边界）
+                rect = QRect(0, 0, pixmap.width(), pixmap.height())
+                frame = FrameData(pixmap, rect, filename)
+                frame.index = frame_index
+                self.current_bundle.frames.append(frame)
+
+        # 更新UI
+        self.update_frame_list_ui()
 
     def display_image(self, file_path):
         """加载新资源并重置所有编辑器状态"""
