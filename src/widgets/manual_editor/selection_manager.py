@@ -548,7 +548,6 @@ class SelectionManager:
                             editor.current_bundle.frames
                         ):
                             editor.current_bundle.frames[idx].pixmap = new_bg_pix
-                            editor.current_bundle.original_pixmap = new_bg_pix
 
                         # 触发编辑器同步到 AssetBundle 并通知预览面板
                         editor.sync_and_notify()
