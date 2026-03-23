@@ -1887,7 +1887,7 @@ class ManualEditor(QWidget, EditorUI):
         self.set_tool_mode(ToolMode.IDLE)
 
     def _on_transform_update(self, transform_rect):
-        """实时更新图像变换的回调函数 - 使用分层编辑机制"""
+        """实时更新图像变换的回调函数"""
         target = self.get_active_preview_item()
         if (
             not target
@@ -1901,34 +1901,6 @@ class ManualEditor(QWidget, EditorUI):
         rect = transform_rect
 
         # 创建变换后的图像（与原始图像相同大小）
-        transformed_pix = QPixmap(self.transform_base_pixmap.size())
-        transformed_pix.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(transformed_pix)
-        # 将原始选区区域内的图像缩放到变换矩形内
-        painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
-        painter.end()
-
-        # 更新变换图层
-        if hasattr(self, "transform_overlay") and self.transform_overlay:
-            self.transform_overlay.setPixmap(transformed_pix)
-            self.transform_overlay.setPos(0, 0)
-
-    def _confirm_transform(self):
-        """确认变换操作并保存结果 - 使用分层编辑机制"""
-        if not hasattr(self, "transform_box") or not self.transform_box:
-            return
-
-        target = self.get_active_preview_item()
-        if not target:
-            return
-
-        # 获取当前帧索引
-        idx = self.frame_list.currentRow()
-        if idx == -1:
-            idx = 0
-
-        # 创建新的图像，合并变换结果
         new_pixmap = QPixmap(self.transform_base_pixmap.size())
         new_pixmap.fill(Qt.GlobalColor.transparent)
 
@@ -1943,35 +1915,42 @@ class ManualEditor(QWidget, EditorUI):
         # 恢复正常绘制模式
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-        # 绘制变换后的图像
-        if hasattr(self, "transform_overlay") and self.transform_overlay:
-            overlay_pix = self.transform_overlay.pixmap()
-            overlay_pos = self.transform_overlay.pos()
-            painter.drawPixmap(overlay_pos, overlay_pix)
-
+        # 将原始选区区域内的图像缩放到变换矩形内
+        painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
         painter.end()
 
-        # 更新底图
+        # 更新预览项
         target.setPixmap(new_pixmap)
 
-        # 清理变换图层
-        if hasattr(self, "transform_overlay") and self.transform_overlay:
-            if self.transform_overlay.scene():
-                self.transform_overlay.scene().removeItem(self.transform_overlay)
-            delattr(self, "transform_overlay")
+    def _confirm_transform(self):
+        """确认变换操作并保存结果"""
+        if not hasattr(self, "transform_box") or not self.transform_box:
+            return
+
+        target = self.get_active_preview_item()
+        if not target:
+            return
+
+        # 获取当前帧索引
+        idx = self.frame_list.currentRow()
+        if idx == -1:
+            idx = 0
+
+        # 当前预览项已经包含了变换后的结果，直接保存
+        current_pixmap = target.pixmap()
 
         # A. 同步到 Bundle (持久层)
         if self.current_bundle and self.current_bundle.frames:
             if idx < len(self.current_bundle.frames):
-                self.current_bundle.frames[idx].pixmap = new_pixmap.copy()
+                self.current_bundle.frames[idx].pixmap = current_pixmap.copy()
 
         # B. 同步到 current_frames (UI 绑定层)
         if hasattr(self, "current_frames") and self.current_frames:
             if idx < len(self.current_frames):
                 if isinstance(self.current_frames[idx], dict):
-                    self.current_frames[idx]["pixmap"] = new_pixmap.copy()
+                    self.current_frames[idx]["pixmap"] = current_pixmap.copy()
                 elif hasattr(self.current_frames[idx], "pixmap"):
-                    self.current_frames[idx].pixmap = new_pixmap.copy()
+                    self.current_frames[idx].pixmap = current_pixmap.copy()
 
         # 刷新 UI 列表
         self.update_frame_list_ui()
@@ -2269,10 +2248,7 @@ class ManualEditor(QWidget, EditorUI):
             self.transform_base_pixmap = target.pixmap().copy()
             self.save_undo_state()
             
-            # 创建透明图像作为底图，避免显示原始图像
-            transparent_pix = QPixmap(self.transform_base_pixmap.size())
-            transparent_pix.fill(Qt.GlobalColor.transparent)
-            target.setPixmap(transparent_pix)
+            # 保持原始图像显示，不设置透明底图
 
             # 检查是否有用户选区
             if hasattr(self, "selection_manager") and self.selection_manager.selections:
@@ -2321,23 +2297,8 @@ class ManualEditor(QWidget, EditorUI):
                 transform_callback=self._on_transform_update,
             )
             
-            # 立即创建初始变换图层，显示选区内容
-            from .selection_manager import ClippedPixmapItem
-            
-            # 创建与原始图像相同大小的图层，但只绘制选区部分
-            overlay_pix = QPixmap(self.transform_base_pixmap.size())
-            overlay_pix.fill(Qt.GlobalColor.transparent)
-            
-            painter = QPainter(overlay_pix)
-            painter.drawPixmap(self.selection_source_rect, self.transform_base_pixmap, self.selection_source_rect)
-            painter.end()
-            
-            self.transform_overlay = ClippedPixmapItem(overlay_pix)
-            self.transform_overlay.is_clone = True
-            self.transform_overlay.setParentItem(target)
-            self.transform_overlay.set_bg_item(target)
-            self.transform_overlay.setZValue(-1)
-            self.transform_overlay.setPos(0, 0)
+            # 不创建变换图层，直接在原始图像上进行变换
+            # 这样可以保持原始图像显示，只对选中部分进行变换
 
             # 视觉配置
             self.view.setDragMode(QGraphicsView.NoDrag)
