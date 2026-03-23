@@ -362,6 +362,8 @@ class ManualEditor(QWidget, EditorUI):
             self.bundle_updated.emit(bundle, curr_seg)
 
     def connect_signals(self):
+        # 关键修复：调整信号连接顺序，让before_frame_changed先执行
+        self.frame_list.currentRowChanged.connect(self.before_frame_changed)
         self.frame_list.currentRowChanged.connect(self.switch_frame_preview)
 
         # 确保 UI 中的所有按钮都正确绑定
@@ -384,9 +386,6 @@ class ManualEditor(QWidget, EditorUI):
         self.btn_shrink.clicked.connect(self.on_shrink_selection)
         self.btn_invert.clicked.connect(self.on_invert_selection)
 
-        # 其他工具
-        self.frame_list.currentRowChanged.connect(self.before_frame_changed)
-
         # 添加右键菜单支持
         self.frame_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.frame_list.customContextMenuRequested.connect(self.show_frame_context_menu)
@@ -397,6 +396,9 @@ class ManualEditor(QWidget, EditorUI):
         注意：修改保存逻辑已移到 switch_frame_preview 中
         """
         print(f"[DEBUG] before_frame_changed - 开始切换帧，当前模式: {self.current_tool_mode}, 当前帧索引: {self.current_frame_index}, 目标帧索引: {new_row}")
+        
+        # 保存当前帧索引（切换前的索引），因为switch_frame_preview已经更新了current_frame_index
+        current_idx = self.current_frame_index
         
         # 如果当前处于变换模式，取消变换，恢复原始图像
         if self.current_tool_mode == ToolMode.TRANSFORM:
@@ -409,23 +411,24 @@ class ManualEditor(QWidget, EditorUI):
                 # 同步更新预览图项，确保显示的是原始图像
                 if hasattr(self, "preview_item") and self.preview_item:
                     self.preview_item.setPixmap(self.transform_base_pixmap)
+                # 强制更新场景，确保UI显示正确
+                self.scene.update()
                 
-                # 同步更新数据模型，确保数据一致性
-                idx = self.current_frame_index
-                if idx >= 0:
+                # 更新数据模型，确保数据一致性 - 使用保存的当前帧索引
+                if current_idx >= 0:
                     # 更新bundle数据
                     if self.current_bundle and self.current_bundle.frames:
-                        if idx < len(self.current_bundle.frames):
-                            print(f"[DEBUG] 更新bundle数据，帧索引: {idx}")
-                            self.current_bundle.frames[idx].pixmap = self.transform_base_pixmap.copy()
+                        if current_idx < len(self.current_bundle.frames):
+                            print(f"[DEBUG] 更新bundle数据，帧索引: {current_idx}")
+                            self.current_bundle.frames[current_idx].pixmap = self.transform_base_pixmap.copy()
                     # 更新current_frames数据
                     if hasattr(self, "current_frames") and self.current_frames:
-                        if idx < len(self.current_frames):
-                            print(f"[DEBUG] 更新current_frames数据，帧索引: {idx}")
-                            if isinstance(self.current_frames[idx], dict):
-                                self.current_frames[idx]["pixmap"] = self.transform_base_pixmap.copy()
-                            elif hasattr(self.current_frames[idx], "pixmap"):
-                                self.current_frames[idx].pixmap = self.transform_base_pixmap.copy()
+                        if current_idx < len(self.current_frames):
+                            print(f"[DEBUG] 更新current_frames数据，帧索引: {current_idx}")
+                            if isinstance(self.current_frames[current_idx], dict):
+                                self.current_frames[current_idx]["pixmap"] = self.transform_base_pixmap.copy()
+                            elif hasattr(self.current_frames[current_idx], "pixmap"):
+                                self.current_frames[current_idx].pixmap = self.transform_base_pixmap.copy()
             
             # 清理变换图层
             if hasattr(self, "transform_overlay") and self.transform_overlay:
@@ -979,7 +982,7 @@ class ManualEditor(QWidget, EditorUI):
                     # 更新bundle数据
                     self.current_bundle.frames[
                         self.current_frame_index
-                    ].pixmap = current_pixmap
+                    ].pixmap = current_pixmap.copy()
                     
                     # 更新current_frames
                     if hasattr(
@@ -988,14 +991,14 @@ class ManualEditor(QWidget, EditorUI):
                         print(f"[DEBUG] switch_frame_preview - 更新current_frames，帧索引: {self.current_frame_index}")
                         if isinstance(self.current_frames[self.current_frame_index], dict):
                             self.current_frames[self.current_frame_index]["pixmap"] = (
-                                current_pixmap
+                                current_pixmap.copy()
                             )
                         elif hasattr(
                             self.current_frames[self.current_frame_index], "pixmap"
                         ):
                             self.current_frames[
                                 self.current_frame_index
-                            ].pixmap = current_pixmap
+                            ].pixmap = current_pixmap.copy()
 
         # 获取当前帧数据（完全独立的图层）
         print(f"[DEBUG] switch_frame_preview - 获取当前帧数据，索引: {index}")
@@ -1919,6 +1922,7 @@ class ManualEditor(QWidget, EditorUI):
 
     def _on_transform_update(self, transform_rect):
         """实时更新图像变换的回调函数 - 使用分层编辑机制"""
+        print(f"[DEBUG] _on_transform_update - 开始变换更新")
         target = self.get_active_preview_item()
         if (
             not target
@@ -1926,10 +1930,12 @@ class ManualEditor(QWidget, EditorUI):
             or self.transform_base_pixmap.isNull()
             or not hasattr(self, "selection_source_rect")
         ):
+            print(f"[DEBUG] _on_transform_update - 条件不满足，返回")
             return
 
         # 获取变换矩形
         rect = transform_rect
+        print(f"[DEBUG] _on_transform_update - 变换矩形: {rect}")
 
         # 创建变换后的图像（与原始图像相同大小）
         transformed_pix = QPixmap(self.transform_base_pixmap.size())
@@ -1939,25 +1945,32 @@ class ManualEditor(QWidget, EditorUI):
         # 将原始选区区域内的图像缩放到变换矩形内
         painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
         painter.end()
+        print(f"[DEBUG] _on_transform_update - 创建变换后的图像，大小: {transformed_pix.size()}")
 
         # 更新变换图层
         if hasattr(self, "transform_overlay") and self.transform_overlay:
             self.transform_overlay.setPixmap(transformed_pix)
             self.transform_overlay.setPos(0, 0)
+            print(f"[DEBUG] _on_transform_update - 更新变换图层")
+        print(f"[DEBUG] _on_transform_update - 结束")
 
     def _confirm_transform(self):
         """确认变换操作并保存结果 - 使用分层编辑机制"""
+        print(f"[DEBUG] _confirm_transform - 开始确认变换")
         if not hasattr(self, "transform_box") or not self.transform_box:
+            print(f"[DEBUG] _confirm_transform - 没有变换框，返回")
             return
 
         target = self.get_active_preview_item()
         if not target:
+            print(f"[DEBUG] _confirm_transform - 没有预览项，返回")
             return
 
         # 获取当前帧索引
         idx = self.frame_list.currentRow()
         if idx == -1:
             idx = 0
+        print(f"[DEBUG] _confirm_transform - 当前帧索引: {idx}")
 
         # 创建新的图像，合并变换结果
         new_pixmap = QPixmap(self.transform_base_pixmap.size())
@@ -1979,30 +1992,37 @@ class ManualEditor(QWidget, EditorUI):
             overlay_pix = self.transform_overlay.pixmap()
             overlay_pos = self.transform_overlay.pos()
             painter.drawPixmap(overlay_pos, overlay_pix)
+            print(f"[DEBUG] _confirm_transform - 绘制变换后的图像")
 
         painter.end()
 
         # 更新底图
         target.setPixmap(new_pixmap)
+        print(f"[DEBUG] _confirm_transform - 更新底图")
 
         # 清理变换图层
         if hasattr(self, "transform_overlay") and self.transform_overlay:
             if self.transform_overlay.scene():
                 self.transform_overlay.scene().removeItem(self.transform_overlay)
             delattr(self, "transform_overlay")
+            print(f"[DEBUG] _confirm_transform - 清理变换图层")
 
         # A. 同步到 Bundle (持久层)
         if self.current_bundle and self.current_bundle.frames:
             if idx < len(self.current_bundle.frames):
-                self.current_bundle.frames[idx].pixmap = new_pixmap
+                self.current_bundle.frames[idx].pixmap = new_pixmap.copy()
+                print(f"[DEBUG] _confirm_transform - 更新bundle数据，帧索引: {idx}")
 
         # B. 同步到 current_frames (UI 绑定层)
         if hasattr(self, "current_frames") and self.current_frames:
             if idx < len(self.current_frames):
                 if isinstance(self.current_frames[idx], dict):
-                    self.current_frames[idx]["pixmap"] = new_pixmap
+                    self.current_frames[idx]["pixmap"] = new_pixmap.copy()
                 elif hasattr(self.current_frames[idx], "pixmap"):
-                    self.current_frames[idx].pixmap = new_pixmap
+                    self.current_frames[idx].pixmap = new_pixmap.copy()
+                print(f"[DEBUG] _confirm_transform - 更新current_frames数据，帧索引: {idx}")
+        
+        print(f"[DEBUG] _confirm_transform - 结束")
 
         # 刷新 UI 列表
         self.update_frame_list_ui()
@@ -2291,19 +2311,23 @@ class ManualEditor(QWidget, EditorUI):
             self.view.setDragMode(QGraphicsView.NoDrag)
 
         elif mode == ToolMode.TRANSFORM:
+            print(f"[DEBUG] 激活变换工具")
             target = self.get_active_preview_item()
             if not target or not target.pixmap() or target.pixmap().isNull():
+                print(f"[DEBUG] 没有预览项或图像为空，退出变换模式")
                 self.set_tool_mode(ToolMode.IDLE)
                 return
 
             # 保存当前显示的图像作为变换基准
             self.transform_base_pixmap = target.pixmap().copy()
             self.save_undo_state()
+            print(f"[DEBUG] 保存变换基准图像，大小: {self.transform_base_pixmap.size()}")
             
             # 创建透明图像作为底图，避免显示原始图像
             transparent_pix = QPixmap(self.transform_base_pixmap.size())
             transparent_pix.fill(Qt.GlobalColor.transparent)
             target.setPixmap(transparent_pix)
+            print(f"[DEBUG] 设置底图为透明图像")
 
             # 检查是否有用户选区
             if hasattr(self, "selection_manager") and self.selection_manager.selections:
@@ -2328,6 +2352,7 @@ class ManualEditor(QWidget, EditorUI):
                     self.selection_source_rect = local_rect
                     # 使用精确的选区矩形创建变换框
                     transform_rect = local_rect
+                    print(f"[DEBUG] 使用选区作为变换范围: {transform_rect}")
 
                     # 清除选区框，避免显示不一致 - 传递当前帧索引确保正确合并
                     current_index = self.frame_list.currentRow()
@@ -2336,6 +2361,7 @@ class ManualEditor(QWidget, EditorUI):
                     # 多个选区时，使用图像的非透明区域边界
                     transform_rect = self._get_image_bounds(self.transform_base_pixmap)
                     self.selection_source_rect = transform_rect
+                    print(f"[DEBUG] 使用图像非透明区域作为变换范围: {transform_rect}")
 
                     # 清除选区框 - 传递当前帧索引确保正确合并
                     current_index = self.frame_list.currentRow()
@@ -2344,6 +2370,7 @@ class ManualEditor(QWidget, EditorUI):
                 # 没有选区时，使用图像的非透明区域边界
                 transform_rect = self._get_image_bounds(self.transform_base_pixmap)
                 self.selection_source_rect = transform_rect
+                print(f"[DEBUG] 没有选区，使用图像非透明区域作为变换范围: {transform_rect}")
 
             # 创建变换框，传递回调函数
             self.transform_box = TransformBoxItem(
@@ -2351,6 +2378,7 @@ class ManualEditor(QWidget, EditorUI):
                 parent_item=target,
                 transform_callback=self._on_transform_update,
             )
+            print(f"[DEBUG] 创建变换框")
             
             # 立即创建初始变换图层，显示选区内容
             from .selection_manager import ClippedPixmapItem
@@ -2365,6 +2393,7 @@ class ManualEditor(QWidget, EditorUI):
             
             self.transform_overlay = ClippedPixmapItem(overlay_pix)
             self.transform_overlay.is_clone = True
+            print(f"[DEBUG] 创建初始变换图层")
             self.transform_overlay.setParentItem(target)
             self.transform_overlay.set_bg_item(target)
             self.transform_overlay.setZValue(-1)
