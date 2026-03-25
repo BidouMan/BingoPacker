@@ -282,6 +282,11 @@ class ManualEditor(QWidget, EditorUI):
         # 把 manager 引用塞进 view 里面，否则 view 里的 hasattr(self, 'selection_manager') 永远是 False
         self.view.selection_manager = self.selection_manager
         self.setAcceptDrops(True)
+        
+        # 复制粘贴相关
+        self.copied_pixmap = None  # 存储复制的图像
+        self.copied_rect = None     # 存储复制的矩形区域
+        self.paste_item = None      # 存储粘贴的图像项
 
         # 增加快捷键
         self.shortcut_deselect = QShortcut(QKeySequence("Ctrl+D"), self)
@@ -1327,6 +1332,75 @@ class ManualEditor(QWidget, EditorUI):
         # 在取消选区时合并选区到背景，确保修改被保存
         if hasattr(self, "selection_manager"):
             self.selection_manager.clear_selections(merge_to_bg=True)
+            
+    def copy_selection(self):
+        """复制选中区域的图像"""
+        target = self.get_active_preview_item()
+        if not target or not target.pixmap() or target.pixmap().isNull():
+            return
+            
+        # 检查是否有选区
+        if not hasattr(self, "selection_manager") or not self.selection_manager.selections:
+            return
+            
+        # 获取第一个选区（暂时只支持单个选区复制）
+        selection_item = self.selection_manager.selections[0]
+        
+        # 获取选区在场景中的矩形
+        scene_rect = selection_item.sceneBoundingRect()
+        
+        # 转换到底图图元的局部坐标系
+        local_rect = target.mapFromScene(scene_rect).boundingRect()
+        
+        # 确保矩形在图像范围内
+        image_rect = target.boundingRect()
+        local_rect = local_rect.intersected(image_rect)
+        
+        if local_rect.isNull():
+            return
+            
+        # 复制选区内容
+        source_pixmap = target.pixmap()
+        self.copied_pixmap = source_pixmap.copy(local_rect.toRect())
+        self.copied_rect = local_rect
+        
+    def paste_selection(self):
+        """粘贴复制的图像，并激活transform模式"""
+        if self.copied_pixmap is None or self.copied_pixmap.isNull():
+            return
+            
+        target = self.get_active_preview_item()
+        if not target:
+            return
+            
+        # 保存原始图像作为变换基准（不包含复制的内容）
+        self.transform_base_pixmap = target.pixmap().copy()
+        self.save_undo_state()
+        
+        # 创建粘贴图层（只包含复制的内容）
+        from .selection_manager import ClippedPixmapItem
+        
+        paste_item = ClippedPixmapItem(self.copied_pixmap)
+        paste_item.is_clone = True
+        paste_item.setParentItem(target)
+        paste_item.set_bg_item(target)
+        paste_item.setZValue(100)  # 设置更高的z值，确保显示在最上方
+        
+        # 定位到原位置
+        paste_item.setPos(self.copied_rect.topLeft())
+        
+        # 保存粘贴项引用
+        self.paste_item = paste_item
+        
+        # 设置变换源区域为复制的矩形（用于变换操作）
+        self.selection_source_rect = QRectF(0, 0, self.copied_pixmap.width(), self.copied_pixmap.height())
+        
+        # 清理现有选区
+        if hasattr(self, "selection_manager"):
+            self.selection_manager.clear_selections()
+            
+        # 激活transform模式（使用粘贴项的矩形范围）
+        self.set_tool_mode(ToolMode.TRANSFORM)
 
     def save_current_frame_changes(self, frame_index):
         """手动保存当前帧的修改，模拟手动取消选区的效果"""
@@ -1601,6 +1675,18 @@ class ManualEditor(QWidget, EditorUI):
                 selection_item.setZValue(10)
                 self.scene.addItem(selection_item)
                 self.selection_manager.selections.append(selection_item)
+            event.accept()
+            return
+            
+        # 4. 复制功能（仅在有选区时）
+        if is_ctrl and key == Qt.Key_C:
+            self.copy_selection()
+            event.accept()
+            return
+            
+        # 5. 粘贴功能
+        if is_ctrl and key == Qt.Key_V:
+            self.paste_selection()
             event.accept()
             return
 
@@ -1900,27 +1986,45 @@ class ManualEditor(QWidget, EditorUI):
         # 获取变换矩形
         rect = transform_rect
 
-        # 创建变换后的图像（与原始图像相同大小）
-        new_pixmap = QPixmap(self.transform_base_pixmap.size())
-        new_pixmap.fill(Qt.GlobalColor.transparent)
+        # 检查是否有粘贴项（复制粘贴后）
+        if hasattr(self, "paste_item") and self.paste_item:
+            # 创建变换后的粘贴内容
+            transformed_pix = QPixmap(self.copied_pixmap.size())
+            transformed_pix.fill(Qt.GlobalColor.transparent)
+            
+            painter = QPainter(transformed_pix)
+            # 将复制的内容缩放到变换矩形内
+            painter.drawPixmap(QRectF(0, 0, rect.width(), rect.height()), self.copied_pixmap, self.selection_source_rect)
+            painter.end()
+            
+            # 更新粘贴图层
+            self.paste_item.setPixmap(transformed_pix)
+            
+            # 更新粘贴图层的位置
+            self.paste_item.setPos(rect.topLeft())
+        else:
+            # 普通transform模式，直接更新预览项
+            # 创建变换后的图像（与原始图像相同大小）
+            new_pixmap = QPixmap(self.transform_base_pixmap.size())
+            new_pixmap.fill(Qt.GlobalColor.transparent)
 
-        painter = QPainter(new_pixmap)
-        # 先绘制原始图像
-        painter.drawPixmap(0, 0, self.transform_base_pixmap)
+            painter = QPainter(new_pixmap)
+            # 先绘制原始图像
+            painter.drawPixmap(0, 0, self.transform_base_pixmap)
 
-        # 清除原始选区区域
-        painter.setCompositionMode(QPainter.CompositionMode_DestinationOut)
-        painter.fillRect(self.selection_source_rect, Qt.GlobalColor.black)
+            # 清除原始选区区域
+            painter.setCompositionMode(QPainter.CompositionMode_DestinationOut)
+            painter.fillRect(self.selection_source_rect, Qt.GlobalColor.black)
 
-        # 恢复正常绘制模式
-        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            # 恢复正常绘制模式
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-        # 将原始选区区域内的图像缩放到变换矩形内
-        painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
-        painter.end()
+            # 将原始选区区域内的图像缩放到变换矩形内
+            painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
+            painter.end()
 
-        # 更新预览项
-        target.setPixmap(new_pixmap)
+            # 更新预览项
+            target.setPixmap(new_pixmap)
 
     def _confirm_transform(self):
         """确认变换操作并保存结果"""
@@ -1936,21 +2040,44 @@ class ManualEditor(QWidget, EditorUI):
         if idx == -1:
             idx = 0
 
-        # 当前预览项已经包含了变换后的结果，直接保存
-        current_pixmap = target.pixmap()
+        # 检查是否有粘贴项（复制粘贴后）
+        if hasattr(self, "paste_item") and self.paste_item:
+            # 创建新的图像，合并粘贴图层到原始图像
+            new_pixmap = QPixmap(self.transform_base_pixmap.size())
+            new_pixmap.fill(Qt.GlobalColor.transparent)
+            
+            painter = QPainter(new_pixmap)
+            # 先绘制原始图像
+            painter.drawPixmap(0, 0, self.transform_base_pixmap)
+            # 绘制粘贴图层的内容
+            paste_pix = self.paste_item.pixmap()
+            paste_pos = self.paste_item.pos()
+            painter.drawPixmap(paste_pos, paste_pix)
+            painter.end()
+            
+            # 更新预览项
+            target.setPixmap(new_pixmap)
+            
+            # 清理粘贴图层
+            if self.paste_item.scene():
+                self.paste_item.scene().removeItem(self.paste_item)
+            delattr(self, "paste_item")
+        else:
+            # 普通transform模式，当前预览项已经包含了变换后的结果
+            new_pixmap = target.pixmap()
 
         # A. 同步到 Bundle (持久层)
         if self.current_bundle and self.current_bundle.frames:
             if idx < len(self.current_bundle.frames):
-                self.current_bundle.frames[idx].pixmap = current_pixmap.copy()
+                self.current_bundle.frames[idx].pixmap = new_pixmap.copy()
 
         # B. 同步到 current_frames (UI 绑定层)
         if hasattr(self, "current_frames") and self.current_frames:
             if idx < len(self.current_frames):
                 if isinstance(self.current_frames[idx], dict):
-                    self.current_frames[idx]["pixmap"] = current_pixmap.copy()
+                    self.current_frames[idx]["pixmap"] = new_pixmap.copy()
                 elif hasattr(self.current_frames[idx], "pixmap"):
-                    self.current_frames[idx].pixmap = current_pixmap.copy()
+                    self.current_frames[idx].pixmap = new_pixmap.copy()
 
         # 刷新 UI 列表
         self.update_frame_list_ui()
@@ -2250,8 +2377,24 @@ class ManualEditor(QWidget, EditorUI):
             
             # 保持原始图像显示，不设置透明底图
 
+            # 检查是否有粘贴项（复制粘贴后）
+            if hasattr(self, "paste_item") and self.paste_item:
+                # 使用粘贴项的矩形范围作为变换范围
+                paste_rect = self.paste_item.boundingRect()
+                paste_pos = self.paste_item.pos()
+                
+                # 创建场景坐标系下的矩形
+                transform_rect = QRectF(
+                    paste_pos.x() + paste_rect.left(),
+                    paste_pos.y() + paste_rect.top(),
+                    paste_rect.width(),
+                    paste_rect.height(),
+                )
+            # 检查是否已经设置了变换源区域
+            elif hasattr(self, "selection_source_rect"):
+                transform_rect = self.selection_source_rect
             # 检查是否有用户选区
-            if hasattr(self, "selection_manager") and self.selection_manager.selections:
+            elif hasattr(self, "selection_manager") and self.selection_manager.selections:
                 # 如果只有一个选区，使用它作为变换范围
                 if len(self.selection_manager.selections) == 1:
                     selection_item = self.selection_manager.selections[0]
