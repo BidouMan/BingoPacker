@@ -1995,6 +1995,20 @@ class ManualEditor(QWidget, EditorUI):
 
         # 获取变换矩形
         rect = transform_rect
+        
+        # 检查是否有形变工具位置信息
+        if hasattr(self, "transform_box") and self.transform_box:
+            # 获取形变工具的位置，用于普通transform模式的移动
+            box_pos = self.transform_box.pos()
+            # 创建包含位置信息的变换矩形
+            rect_with_pos = QRectF(
+                box_pos.x() + rect.left(),
+                box_pos.y() + rect.top(),
+                rect.width(),
+                rect.height()
+            )
+        else:
+            rect_with_pos = rect
 
         # 检查是否有粘贴项（复制粘贴后）
         if hasattr(self, "paste_item") and self.paste_item:
@@ -2011,7 +2025,7 @@ class ManualEditor(QWidget, EditorUI):
             self.paste_item.setPixmap(transformed_pix)
             
             # 更新粘贴图层的位置
-            self.paste_item.setPos(rect.topLeft())
+            self.paste_item.setPos(rect_with_pos.topLeft())
         else:
             # 普通transform模式，直接更新预览项
             # 创建变换后的图像（与原始图像相同大小）
@@ -2029,8 +2043,8 @@ class ManualEditor(QWidget, EditorUI):
             # 恢复正常绘制模式
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-            # 将原始选区区域内的图像缩放到变换矩形内
-            painter.drawPixmap(rect, self.transform_base_pixmap, self.selection_source_rect)
+            # 将原始选区区域内的图像缩放到变换矩形内（包含位置信息）
+            painter.drawPixmap(rect_with_pos, self.transform_base_pixmap, self.selection_source_rect)
             painter.end()
 
             # 更新预览项

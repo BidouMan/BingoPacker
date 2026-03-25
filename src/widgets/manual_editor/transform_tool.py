@@ -32,6 +32,19 @@ class TransformHandle(QGraphicsRectItem):
         painter.setBrush(self.brush())
         painter.drawEllipse(self.rect())  # 画圆形
 
+    def hoverEnterEvent(self, event):
+        """鼠标悬停在手柄上时改变光标样式"""
+        if self.pos_key == "tl" or self.pos_key == "br":
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif self.pos_key == "tr" or self.pos_key == "bl":
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        """鼠标离开手柄时恢复光标样式"""
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
     def itemChange(self, change, value):
         if (
             change == QGraphicsItem.GraphicsItemChange.ItemPositionChange
@@ -141,6 +154,11 @@ class TransformBoxItem(QGraphicsRectItem):
         self.initial_height = initial_rect.height()
         self.initial_ratio = self.initial_width / self.initial_height if self.initial_height > 0 else 1
 
+        # 设置可移动和鼠标事件
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setAcceptHoverEvents(True)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
         self.handles = {}
         for key in ["tl", "tr", "bl", "br"]:
             handle = TransformHandle(self, key)
@@ -148,6 +166,10 @@ class TransformBoxItem(QGraphicsRectItem):
             self.handles[key] = handle
 
         self.update_handles_pos()
+        
+        # 鼠标移动相关
+        self._is_dragging = False
+        self._drag_start_pos = QPointF()
 
     def update_handles_pos(self):
         """根据当前矩形位置，将4个手柄对齐到顶点"""
@@ -168,6 +190,58 @@ class TransformBoxItem(QGraphicsRectItem):
         """实时更新图像变换"""
         if self.transform_callback:
             self.transform_callback(self.rect())
+
+    def hoverEnterEvent(self, event):
+        """鼠标进入时改变光标样式"""
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        """鼠标离开时恢复光标样式"""
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event):
+        """开始拖动"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = True
+            self._drag_start_pos = event.pos()
+            event.accept()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """拖动过程中"""
+        if self._is_dragging:
+            delta = event.pos() - self._drag_start_pos
+            new_pos = self.pos() + delta
+            
+            # 像素吸附：将位置对齐到整数像素
+            new_pos = QPointF(round(new_pos.x()), round(new_pos.y()))
+            self.setPos(new_pos)
+            
+            # 更新手柄位置
+            self.update_handles_pos()
+            
+            # 实时更新图像变换
+            self.update_transform()
+            
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """结束拖动"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = False
+            event.accept()
+        super().mouseReleaseEvent(event)
+
+    def itemChange(self, change, value):
+        """处理位置变化"""
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            # 像素吸附：将位置对齐到整数像素
+            return QPointF(round(value.x()), round(value.y()))
+        return super().itemChange(change, value)
 
     def paint(self, painter, option, widget):
         r = self.rect()
