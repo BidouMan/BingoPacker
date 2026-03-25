@@ -2379,17 +2379,24 @@ class ManualEditor(QWidget, EditorUI):
 
             # 检查是否有粘贴项（复制粘贴后）
             if hasattr(self, "paste_item") and self.paste_item:
-                # 使用粘贴项的矩形范围作为变换范围
-                paste_rect = self.paste_item.boundingRect()
-                paste_pos = self.paste_item.pos()
-                
-                # 创建场景坐标系下的矩形
-                transform_rect = QRectF(
-                    paste_pos.x() + paste_rect.left(),
-                    paste_pos.y() + paste_rect.top(),
-                    paste_rect.width(),
-                    paste_rect.height(),
-                )
+                try:
+                    # 使用粘贴项的矩形范围作为变换范围
+                    paste_rect = self.paste_item.boundingRect()
+                    paste_pos = self.paste_item.pos()
+                    
+                    # 创建场景坐标系下的矩形
+                    transform_rect = QRectF(
+                        paste_pos.x() + paste_rect.left(),
+                        paste_pos.y() + paste_rect.top(),
+                        paste_rect.width(),
+                        paste_rect.height(),
+                    )
+                except RuntimeError:
+                    # 对象已被删除，清理引用并使用默认行为
+                    delattr(self, "paste_item")
+                    # 回退到使用非透明区域边界
+                    transform_rect = self._get_image_bounds(self.transform_base_pixmap)
+                    self.selection_source_rect = transform_rect
             # 检查是否已经设置了变换源区域
             elif hasattr(self, "selection_source_rect"):
                 transform_rect = self.selection_source_rect
