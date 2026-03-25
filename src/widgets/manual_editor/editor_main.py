@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QVBoxLayout,
     QScrollArea,
+    QApplication,
 )
 from PySide6.QtCore import Qt, QRectF, QRect, Signal, QSize, QPoint, QEvent, QTimer
 from PySide6.QtGui import (
@@ -50,6 +51,7 @@ class SliceCardWidget(QWidget):
         self.index = index
         self.lock_y_offset = frame_data.get("lock_y_offset", False)
         self.selected_for_crop = False  # 默认都不选中，用户需要手动选择
+        self.is_mouse_pressed = False  # 鼠标按下状态
 
         # 创建主布局
         layout = QVBoxLayout(self)
@@ -202,19 +204,49 @@ class SliceCardWidget(QWidget):
             """)
 
     def mousePressEvent(self, event):
-        """处理鼠标点击事件 - 切换选中状态（用于裁切）"""
+        """处理鼠标按下事件"""
         if event.button() == Qt.LeftButton:
             # 将事件位置转换到标签坐标系
             label_pos = self.pixmap_label.mapFromGlobal(self.mapToGlobal(event.pos()))
             # 检查是否点击了锁定按钮
             if self.lock_button.geometry().contains(label_pos):
+                super().mousePressEvent(event)
                 return
+            
+            self.is_mouse_pressed = True
             # 切换选中状态
-            new_selected = not self.selected_for_crop
-            self.set_selected(new_selected)
-            # 发送信号通知状态变化
+            self.selected_for_crop = not self.selected_for_crop
+            self.set_selected(self.selected_for_crop)
+            # 通知父组件
             if hasattr(self.parent(), "on_card_selected_for_crop"):
-                self.parent().on_card_selected_for_crop(self.index, new_selected)
+                self.parent().on_card_selected_for_crop(self.index, self.selected_for_crop)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """处理鼠标移动事件"""
+        if self.is_mouse_pressed:
+            # 获取鼠标位置的全局坐标
+            global_pos = self.mapToGlobal(event.pos())
+            # 查找当前鼠标位置下的其他卡片
+            widget_at_pos = QApplication.widgetAt(global_pos)
+            # 检查是否是其他SliceCardWidget
+            while widget_at_pos:
+                if isinstance(widget_at_pos, SliceCardWidget) and widget_at_pos != self:
+                    # 设置其他卡片的选中状态为当前卡片的状态
+                    widget_at_pos.selected_for_crop = self.selected_for_crop
+                    widget_at_pos.set_selected(self.selected_for_crop)
+                    # 通知父组件
+                    if hasattr(widget_at_pos.parent(), "on_card_selected_for_crop"):
+                        widget_at_pos.parent().on_card_selected_for_crop(widget_at_pos.index, self.selected_for_crop)
+                    break
+                widget_at_pos = widget_at_pos.parent()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """处理鼠标释放事件"""
+        if event.button() == Qt.LeftButton:
+            self.is_mouse_pressed = False
+        super().mouseReleaseEvent(event)
 
 
 class ManualEditor(QWidget, EditorUI):
