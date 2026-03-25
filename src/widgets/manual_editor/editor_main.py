@@ -1720,6 +1720,16 @@ class ManualEditor(QWidget, EditorUI):
                         self.transform_overlay.scene().removeItem(self.transform_overlay)
                     delattr(self, "transform_overlay")
                 
+                # 清理粘贴项
+                if hasattr(self, "paste_item") and self.paste_item:
+                    if self.paste_item.scene():
+                        self.paste_item.scene().removeItem(self.paste_item)
+                    delattr(self, "paste_item")
+                
+                # 清理变换源区域
+                if hasattr(self, "selection_source_rect"):
+                    delattr(self, "selection_source_rect")
+                
                 self.set_tool_mode(ToolMode.IDLE)
                 event.accept()
                 return
