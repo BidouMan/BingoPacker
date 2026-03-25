@@ -1988,8 +1988,8 @@ class ManualEditor(QWidget, EditorUI):
 
         # 检查是否有粘贴项（复制粘贴后）
         if hasattr(self, "paste_item") and self.paste_item:
-            # 创建变换后的粘贴内容
-            transformed_pix = QPixmap(self.copied_pixmap.size())
+            # 创建变换后的粘贴内容，使用变换矩形的尺寸，允许放大
+            transformed_pix = QPixmap(rect.size().toSize())
             transformed_pix.fill(Qt.GlobalColor.transparent)
             
             painter = QPainter(transformed_pix)
