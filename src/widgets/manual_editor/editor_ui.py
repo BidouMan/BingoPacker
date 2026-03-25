@@ -70,14 +70,14 @@ class EditorUI:
             }}
             QListWidget::item:selected {{ 
                 background-color: #3e4451; 
-                border: 1px solid #61afef; 
+                border: 1px solid rgb(137, 180, 250); 
             }}
             QPushButton {{ background-color: #353b45; border: 1px solid #181a1f; border-radius: 4px; padding: 6px; font-weight: bold; }}
             QPushButton:hover {{ background-color: #3e4451; }}
 
             /* --- 仅为新组件添加必要的样式，不触碰原有组件 --- */
             QSlider::groove:horizontal {{ border: 1px solid #181a1f; height: 4px; background: #353b45; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: #89b4fa; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }}
+            QSlider::handle:horizontal {{ background: rgb(137, 180, 250); width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }}
             
             QCheckBox::indicator {{ 
                 width: 14; 
@@ -95,14 +95,14 @@ class EditorUI:
 
             /* 2. 选中状态只改背景和图片，不改尺寸相关属性 */
             QCheckBox::indicator:checked {{ 
-                background-color: #89b4fa; 
+                background-color: rgb(137, 180, 250); 
                 /* 引用你的 SVG */
                 image: url({magic_wand_select_path});
             }}
             QToolTip {{
                 background-color: #21252b;
                 color: #abb2bf;
-                border: 1px solid #61afef;
+                border: 1px solid rgb(137, 180, 250);
                 padding: 3px 5px;
 
                 /* 保证 tooltip 永远在最前面 */

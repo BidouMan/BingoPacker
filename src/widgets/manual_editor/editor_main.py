@@ -34,6 +34,7 @@ from .selection_manager import SelectionManager
 from ...logic_slice import SliceLogic
 from ...asset_manager import AssetManager
 from ...asset_model import AssetBundle, FrameData
+from ...utils import get_resource_path
 from .magic_wand import MagicWandTool, SelectionAntsItem
 from .crop_tool import CropBoxItem
 from .transform_tool import TransformBoxItem
@@ -63,7 +64,7 @@ class SliceCardWidget(QWidget):
         # 创建带帧数的图像
         pixmap = frame_data["pixmap"]
         scaled_pixmap = pixmap.scaled(
-            120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            120, 120, Qt.KeepAspectRatio, Qt.FastTransformation
         )
 
         # 在图像上绘制帧数
@@ -101,17 +102,9 @@ class SliceCardWidget(QWidget):
 
         # 设置图标 - 只在选中状态显示
         if self.lock_y_offset:
-            # 创建勾勾图标（选中状态）
-            icon_pixmap = QPixmap(16, 16)
-            icon_pixmap.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(icon_pixmap)
-
-            # 绘制勾勾图标
-            painter.setPen(QPen(Qt.GlobalColor.white, 2))
-            painter.drawLine(4, 8, 8, 12)  # 勾的第一笔
-            painter.drawLine(8, 12, 12, 4)  # 勾的第二笔
-
-            painter.end()
+            # 使用lock_y.svg图标（选中状态）
+            lock_y_path = get_resource_path("assets/icons/lock_y.svg")
+            icon_pixmap = QPixmap(lock_y_path)
             self.lock_button.setIcon(QIcon(icon_pixmap))
             self.lock_button.setIconSize(QSize(12, 12))
         else:
@@ -173,17 +166,9 @@ class SliceCardWidget(QWidget):
 
         # 更新图标
         if self.lock_y_offset:
-            # 创建勾勾图标（选中状态）
-            icon_pixmap = QPixmap(16, 16)
-            icon_pixmap.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(icon_pixmap)
-
-            # 绘制勾勾图标
-            painter.setPen(QPen(Qt.GlobalColor.white, 2))
-            painter.drawLine(4, 8, 8, 12)  # 勾的第一笔
-            painter.drawLine(8, 12, 12, 4)  # 勾的第二笔
-
-            painter.end()
+            # 使用lock_y.svg图标（选中状态）
+            lock_y_path = get_resource_path("assets/icons/lock_y.svg")
+            icon_pixmap = QPixmap(lock_y_path)
             self.lock_button.setIcon(QIcon(icon_pixmap))
             self.lock_button.setIconSize(QSize(12, 12))
         else:
@@ -2687,14 +2672,14 @@ class ManualEditor(QWidget, EditorUI):
         confirm_btn.setFixedSize(100, 32)
         confirm_btn.setStyleSheet("""
             QPushButton {
-                background-color: #61afef;
-                color: #21252b;
+                background-color: rgb(137, 180, 250);
+                color: white;
                 border: none;
                 border-radius: 4px;
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #78b9f0;
+                background-color: rgb(150, 190, 255);
             }
         """)
         button_layout.addWidget(confirm_btn)
