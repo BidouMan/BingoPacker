@@ -8,6 +8,8 @@ __pycache__/
 build/
 dist/
 *.spec
+# 但发布用的 spec 必须入库，CI 依赖它
+!BingoPacker.spec
 
 # --- 操作系统与 IDE ---
 .DS_Store

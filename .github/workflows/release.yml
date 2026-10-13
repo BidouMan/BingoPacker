@@ -1,0 +1,258 @@
+name: Build & Release
+
+# 推 v* 标签即触发打包并发布 Release；也可手动触发做一次「不发 Release」的试跑。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不带 v 前缀），仅用于产物命名'
+        required: true
+        default: '1.0.1-test'
+      publish:
+        description: '是否同时创建 GitHub Release（打标签触发时恒为是）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: BingoPacker
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  resolve:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      is_tag: ${{ steps.v.outputs.is_tag }}
+    steps:
+      - id: v
+        run: |
+          set -eu
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            is_tag=1
+          else
+            version="${{ inputs.version }}"
+            is_tag=0
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "is_tag=$is_tag" >> "$GITHUB_OUTPUT"
+          echo "resolved version=$version is_tag=$is_tag"
+
+  build-macos:
+    name: Build macOS (arm64) dmg
+    needs: resolve
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Assert arm64 toolchain
+        run: |
+          set -eu
+          uname -m
+          python -c "import platform,sys; m=platform.machine(); print('python', sys.version.split()[0], m); assert m=='arm64', f'需要 arm64，实际为 {m}'"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build .app with PyInstaller
+        env:
+          BINGO_APP_NAME: ${{ env.APP_NAME }}
+          BINGO_APP_VERSION: ${{ needs.resolve.outputs.version }}
+        run: pyinstaller --noconfirm --clean --distpath dist --workpath build BingoPacker.spec
+
+      - name: Verify bundle
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -eu
+          APP="dist/${APP_NAME}.app"
+          BIN="$APP/Contents/MacOS/${APP_NAME}"
+          echo "=== dist ==="; ls -la dist
+          [ -d "$APP" ] || { echo "error: $APP 不存在"; exit 1; }
+          [ -x "$BIN" ] || { echo "error: $BIN 不存在或不可执行"; exit 1; }
+          echo "archs: $(lipo -archs "$BIN")"
+          lipo -archs "$BIN" | grep -qw arm64 || { echo "error: 产物不是 arm64"; exit 1; }
+          if [ -d "$APP/Contents/Frameworks/assets/icons" ]; then
+            echo "assets: Contents/Frameworks/assets"
+          elif [ -d "$APP/Contents/Resources/assets/icons" ]; then
+            echo "assets: Contents/Resources/assets"
+          else
+            echo "error: 资源目录缺失，Contents 结构如下"; find "$APP/Contents" -maxdepth 2; exit 1
+          fi
+          got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+          echo "CFBundleShortVersionString=$got"
+          [ "$got" = "$VERSION" ] || { echo "error: 版本号应为 $VERSION，实际 $got"; exit 1; }
+          echo "=== bundle size ==="; du -sh "$APP"
+
+      - name: Smoke test (offscreen)
+        run: |
+          set -eu
+          BIN="dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+          export QT_QPA_PLATFORM=offscreen
+          "$BIN" > /tmp/smoke.log 2>&1 &
+          pid=$!
+          sleep 10
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "✓ 启动后 10 秒仍在运行，视为通过"
+            kill "$pid" 2>/dev/null || true
+            exit 0
+          fi
+          set +e
+          wait "$pid"; code=$?
+          set -e
+          echo "进程提前退出，exit code=$code"; cat /tmp/smoke.log
+          [ "$code" -eq 0 ] && { echo "warning: 提前以 0 退出，放行"; exit 0; }
+          exit 1
+
+      - name: Build dmg
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -eu
+          bash packaging/macos/make_dmg.sh \
+            "dist/${APP_NAME}.app" \
+            "dist/${APP_NAME}-v${VERSION}-macOS-arm64.dmg" \
+            "${APP_NAME}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows (x64) installer
+    needs: resolve
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        env:
+          BINGO_APP_NAME: ${{ env.APP_NAME }}
+          BINGO_APP_VERSION: ${{ needs.resolve.outputs.version }}
+        run: pyinstaller --noconfirm --clean --distpath dist --workpath build BingoPacker.spec
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          $exe = "dist\$env:APP_NAME\$env:APP_NAME.exe"
+          if (!(Test-Path $exe)) { throw "missing: $exe" }
+          Get-ChildItem dist | Select-Object Name, Length
+          $size = [math]::Round((Get-ChildItem "dist\$env:APP_NAME" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "bundle size: $size MB"
+
+      - name: Smoke test (offscreen)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $exe = "dist\$env:APP_NAME\$env:APP_NAME.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) {
+            if ($p.ExitCode -ne 0) { throw "exe 提前退出，exit code=$($p.ExitCode)" }
+            Write-Host "warning: 提前以 0 退出，放行"
+          } else {
+            Write-Host "OK: 启动后 10 秒仍在运行"
+            Stop-Process -Id $p.Id -Force
+          }
+
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue |
+                  Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $iscc) {
+            Write-Host "Inno Setup 未预装，尝试安装..."
+            choco install innosetup -y --no-progress
+            $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue |
+                    Sort-Object FullName -Descending | Select-Object -First 1
+          }
+          if (-not $iscc) { throw "找不到 ISCC.exe" }
+          Write-Host "ISCC: $($iscc.FullName) version $($iscc.VersionInfo.ProductVersion)"
+
+          $root = $PWD.Path
+          & $iscc.FullName `
+            "/DAppVersion=$env:VERSION" `
+            "/DSourceDir=$root\dist\$env:APP_NAME" `
+            "/DOutputDir=$root\dist" `
+            "/DOutputBaseFilename=$env:APP_NAME-v$env:VERSION-windows-x64-setup" `
+            "/DIconFile=$root\assets\icons\logo_win.ico" `
+            "packaging\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败，exit code=$LASTEXITCODE" }
+          Get-ChildItem dist\*.exe | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [resolve, build-macos, build-windows]
+    if: ${{ needs.resolve.outputs.is_tag == '1' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show assets
+        run: ls -lh dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          IS_TAG: ${{ needs.resolve.outputs.is_tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          cat > /tmp/notes.md <<'EOF'
+          ## 安装说明
+
+          - **macOS (Apple Silicon / arm64)**：下载 `.dmg`，把 BingoPacker 拖进「应用程序」。
+            该包**未做 Apple 开发者签名与公证**，首次打开若提示「已损坏」或「无法验证开发者」，
+            请右键 →「打开」，或执行：
+            `xattr -dr com.apple.quarantine /Applications/BingoPacker.app`
+          - **Windows (x64)**：下载 `...-windows-x64-setup.exe`，双击安装。
+
+          > 产物由 GitHub Actions 从对应 tag 的源码自动构建，仅供测试分发使用。
+          EOF
+
+          args=(--repo "$REPO" --title "BingoPacker v${VERSION}" --notes-file /tmp/notes.md)
+          if [ "$IS_TAG" = "1" ]; then
+            args+=(--verify-tag)
+          fi
+          gh release create "v${VERSION}" dist/*.dmg dist/*.exe "${args[@]}"
